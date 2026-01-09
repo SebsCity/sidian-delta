@@ -30,6 +30,7 @@ with st.sidebar:
         m_date = st.date_input("Date", datetime.today())
         m_nums = st.text_input("Numbers (e.g. 5,18,24,36,41,48,20)")
         submit_m = st.form_submit_button("Inject Draw")
+        
         if submit_m and m_nums:
             try:
                 n_list = [int(x.strip()) for x in m_nums.split(',')]
@@ -39,6 +40,10 @@ with st.sidebar:
                     if len(n_list) > 6: entry['Bonus'] = n_list[6]
                     st.session_state.manual_draws.append(entry)
                     st.success("Draw Added!")
+                else:
+                    st.error("Need at least 6 numbers.")
+            except:
+                st.error("Invalid Format! Use commas.")
     
     if st.session_state.manual_draws:
         if st.button("Clear Manual Data"):
@@ -95,16 +100,20 @@ if uploaded_file or st.session_state.manual_draws:
             for i in range(1, 11):
                 if len(df) >= i:
                     recent_nums.extend(get_numbers(df.iloc[-i]))
-            hot_candidates = [num for num, count in pd.Series(recent_nums).value_counts().head(5).items()]
             
-            cols = st.columns(len(hot_candidates))
-            for idx, hot in enumerate(hot_candidates):
-                p1 = hot - delta
-                p2 = hot + delta
-                with cols[idx]:
-                    st.markdown(f"<div class='pair-box'><b>Base: {hot}</b><br>{p1 if p1>0 else 'X'} & {p2 if p2<=49 else 'X'}</div>", unsafe_allow_html=True)
-            
-            st.caption(f"Strategy: Play the Hot Number ({hot_candidates}) paired with numbers {delta} units away.")
+            if recent_nums:
+                hot_candidates = [num for num, count in pd.Series(recent_nums).value_counts().head(5).items()]
+                
+                cols = st.columns(len(hot_candidates))
+                for idx, hot in enumerate(hot_candidates):
+                    p1 = hot - delta
+                    p2 = hot + delta
+                    with cols[idx]:
+                        p1_txt = p1 if p1 > 0 else 'X'
+                        p2_txt = p2 if p2 <= 49 else 'X'
+                        st.markdown(f"<div class='pair-box'><b>Base: {hot}</b><br>{p1_txt} & {p2_txt}</div>", unsafe_allow_html=True)
+                
+                st.caption(f"Strategy: Play the Hot Number ({hot_candidates}) paired with numbers {delta} units away.")
 
     # --- TAB 2: SINGLE SCAN (OLD LOGIC) ---
     with tab2:
@@ -149,22 +158,24 @@ if uploaded_file or st.session_state.manual_draws:
         st.subheader("Analyze Last Draw's Gaps")
         nums = sorted(last_draw_nums)
         # Calculate diffs
-        diffs = [nums[i+1] - nums[i] for i in range(len(nums)-1)]
-        
-        st.write(f"Last Draw Sequence: {nums}")
-        st.write(f"Gaps found: {diffs}")
-        
-        common_gap = max(set(diffs), key=diffs.count)
-        st.success(f"Dominant Gap Pattern: **{common_gap}**")
-        
-        st.write(f"If the machine repeats the Gap of **{common_gap}**, watch these Hot Pairs:")
-        
-        # Generator
-        hot_pairs = []
-        for i in range(1, 49-common_gap):
-            hot_pairs.append(f"{i} - {i+common_gap}")
-        
-        st.text_area("All Possible Pairs with this Gap:", ", ".join(hot_pairs[:10]) + "...")
+        if len(nums) > 1:
+            diffs = [nums[i+1] - nums[i] for i in range(len(nums)-1)]
+            
+            st.write(f"Last Draw Sequence: {nums}")
+            st.write(f"Gaps found: {diffs}")
+            
+            if diffs:
+                common_gap = max(set(diffs), key=diffs.count)
+                st.success(f"Dominant Gap Pattern: **{common_gap}**")
+                
+                st.write(f"If the machine repeats the Gap of **{common_gap}**, watch these Hot Pairs:")
+                
+                # Generator
+                hot_pairs = []
+                for i in range(1, 49-common_gap):
+                    hot_pairs.append(f"{i} - {i+common_gap}")
+                
+                st.text_area("All Possible Pairs with this Gap:", ", ".join(hot_pairs[:10]) + "...")
 
     # --- TAB 4: GRID ---
     with tab4:
