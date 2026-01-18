@@ -1,88 +1,78 @@
 import streamlit as st
+import pandas as pd
 
-# Page Configuration
-st.set_page_config(page_title="The Sidian Auditor", page_icon="🎱", layout="centered")
+st.set_page_config(page_title="Sidian Master Scanner", page_icon="🧬")
 
-# Title and Description
-st.title("🎱 The Sidian Triad Auditor")
-st.markdown("""
-**Protocol:**
-1. Input the **Date** of the draw you are playing.
-2. Input the **Previous Bonus Ball**.
-3. Input the **Lowest Main Number** (from the previous draw) for the Gap Method.
-""")
+st.title("🧬 The Sidian Master Scanner")
+st.markdown("Upload your **merged single file** (Lunch/Tea in order) to run the Bouncing Ball analysis.")
 
-st.divider()
+# --- FILE UPLOADER ---
+uploaded_file = st.file_uploader("📂 Upload Master Sequence CSV", type=['csv', 'xlsx'])
 
-# --- INPUT SECTION ---
-col1, col2, col3 = st.columns(3)
-
-with col1:
-    play_date = st.number_input("📅 Date of Draw (D)", min_value=1, max_value=31, value=17)
-
-with col2:
-    bonus_ball = st.number_input("🔵 Last Bonus Ball (B)", min_value=1, max_value=49, value=14)
-
-with col3:
-    lowest_main = st.number_input("📉 Lowest Main (M)", min_value=1, max_value=49, value=9)
-
-st.divider()
-
-# --- LOGIC CORE ---
-
-# Method 1: The Date Driver (B + D) & (B - D)
-# Logic: Primary flow. Add Date to Bonus.
-target_1_sum = bonus_ball + play_date
-target_1_diff = abs(bonus_ball - play_date)
-
-# Method 2: The Inverse 49 (The Trap)
-# Logic: 49 - (Difference of Bonus and Date) AND 49 - (Sum of Bonus and Date)
-# This catches cases like Dec 7 (34-7=27 -> 49-27=22) and Dec 3 (34+3=37 -> 49-37=12)
-diff_b_d = abs(bonus_ball - play_date)
-sum_b_d = bonus_ball + play_date
-
-target_2_inv_diff = 49 - diff_b_d
-target_2_inv_sum = 49 - sum_b_d if sum_b_d < 49 else "N/A (Sum > 49)"
-
-# Method 3: The Gap (The Mechanic)
-# Logic: Difference between Bonus and Lowest Main
-target_3_gap = abs(bonus_ball - lowest_main)
-
-
-# --- DISPLAY RESULTS ---
-
-st.subheader("🏁 Audit Results")
-
-# Display Option 1
-st.info(f"**Option 1: The Date Driver (Natural Flow)**")
-c1, c2 = st.columns(2)
-c1.metric(label="Sum (B + D)", value=target_1_sum if target_1_sum <= 49 else f"{target_1_sum} (Check Digit Sum)")
-c2.metric(label="Diff (B - D)", value=target_1_diff)
-
-# Display Option 2
-st.warning(f"**Option 2: The Inverse 49 (The Trap)**")
-c3, c4 = st.columns(2)
-c3.metric(label="Inverse of Diff [49 - (B-D)]", value=target_2_inv_diff, help="Classic trap method (e.g. Dec 7)")
-c4.metric(label="Inverse of Sum [49 - (B+D)]", value=target_2_inv_sum, help="Used when Bonus + Date is high (e.g. Dec 3)")
-
-# Display Option 3
-st.success(f"**Option 3: The Gap Method (Internal)**")
-st.metric(label="Main vs Bonus Gap |M - B|", value=target_3_gap, help="Feeder number from internal draw difference")
-
-st.divider()
-
-# --- SUMMARY TABLE ---
-st.markdown("### 📋 Quick Reference Line")
-results_list = [
-    target_1_sum if target_1_sum <= 49 else None,
-    target_1_diff,
-    target_2_inv_diff,
-    target_2_inv_sum if isinstance(target_2_inv_sum, int) else None,
-    target_3_gap
-]
-# Filter None values and sort unique
-final_line = sorted(list(set([x for x in results_list if x is not None and x > 0])))
-
-st.write("Based on the forensic inputs, your calculated hot numbers are:")
-st.code(f"{final_line}", language="python")
-
+if uploaded_file:
+    # Load Data
+    if uploaded_file.name.endswith('.csv'):
+        df = pd.read_csv(uploaded_file)
+    else:
+        df = pd.read_excel(uploaded_file)
+    
+    st.success(f"Loaded {len(df)} draws successfully.")
+    
+    # --- AUTOMATED SCANNER ---
+    st.divider()
+    st.subheader("🔬 Physics Scan Results (Live)")
+    
+    # 1. Flatten Data to find recent hitters
+    # We take the last 20 draws to see what is active
+    recent_slice = df.tail(30).reset_index(drop=True)
+    
+    # Allow user to pick a number to inspect
+    target_num = st.number_input("Enter a Number to Audit (e.g. 16)", min_value=1, max_value=49, value=16)
+    
+    # Find all occurrences of this number in the ENTIRE history
+    # Create a simple list of indices where the number appeared
+    hits = []
+    
+    # Iterate through the dataframe to find rows where the number appeared
+    # (Checking columns N1 to N6 and Bonus)
+    cols_to_check = [c for c in df.columns if c.startswith('N') or c == 'Bonus']
+    
+    for idx, row in df.iterrows():
+        if target_num in row[cols_to_check].values:
+            hits.append(idx)
+            
+    if len(hits) < 2:
+        st.warning("Not enough data to calculate bounce (Need at least 2 hits).")
+    else:
+        # Calculate Gaps
+        last_hit_index = hits[-1]
+        prev_hit_index = hits[-2]
+        gap_current = (len(df) - 1) - last_hit_index  # Draws since last hit
+        
+        gap_between_hits = last_hit_index - prev_hit_index
+        
+        st.write(f"**Last Hit:** Draw #{last_hit_index} ({df.iloc[last_hit_index]['Date']} {df.iloc[last_hit_index]['Draw_Name']})")
+        st.write(f"**Previous Hit:** Draw #{prev_hit_index}")
+        st.write(f"**Gap Size:** {gap_between_hits} draws")
+        
+        if len(hits) >= 3:
+            prev_prev_hit = hits[-3]
+            gap_older = prev_hit_index - prev_prev_hit
+            
+            # Physics Ratio
+            ratio = gap_between_hits / gap_older if gap_older > 0 else 0
+            
+            st.metric("Decay Ratio", f"{ratio:.2f}")
+            
+            if ratio < 0.8:
+                st.error("🚀 ACCELERATING (Speeding Up)")
+                predicted_next = gap_between_hits * ratio
+                st.info(f"**Prediction:** Next hit in approx {round(predicted_next)} draws.")
+            elif ratio > 1.2:
+                st.info("🔵 SLOWING DOWN (Going Cold)")
+            else:
+                st.warning("⚪ STABLE / ROLLING")
+                
+    st.divider()
+    st.caption("Latest Data in File:")
+    st.dataframe(df.tail(5))
