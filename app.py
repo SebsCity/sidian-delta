@@ -1,136 +1,110 @@
-import streamlit as st
-import pandas as pd
-from datetime import timedelta
+# ==========================================
+# TAB 3: THE RESONANCE CHAMBER (Harmonic Pairs)
+# ==========================================
+with tab3:
+    st.header("🔊 The Resonance Chamber")
+    st.caption("Decipher the 'Speaker Analogy': Predict which pair lands next based on the last pair.")
 
-st.set_page_config(page_title="Sidian Master Scanner", page_icon="🧬")
+    # 1. Select the Trigger Pair from the Last Draw
+    # (User looks at the latest results and picks two numbers that drew together)
+    col_r1, col_r2 = st.columns(2)
+    with col_r1:
+        trigger_1 = st.number_input("Trigger Number A (e.g. 5)", min_value=1, max_value=49, value=5)
+    with col_r2:
+        trigger_2 = st.number_input("Trigger Number B (e.g. 17)", min_value=1, max_value=49, value=17)
 
-st.title("🧬 The Sidian Master Scanner")
-st.markdown("Upload your **merged master file** to run the Bouncing Ball analysis with **Date Prediction**.")
+    st.divider()
 
-# --- FILE UPLOADER ---
-uploaded_file = st.file_uploader("📂 Upload Master Sequence CSV", type=['csv', 'xlsx'])
-
-# --- HELPER FUNCTION: Future Date Calculator ---
-def get_future_draw(start_date, start_draw_name, draws_to_add):
-    """
-    Calculates the exact date and draw time by adding X draws to the start point.
-    Handles the Lunch -> Tea -> Next Day Lunch transition.
-    """
-    current_date = pd.to_datetime(start_date)
-    current_draw = start_draw_name.strip()
-    
-    # Round draws to nearest whole number for calendar scheduling
-    steps = int(round(draws_to_add))
-    
-    if steps < 1:
-        steps = 1 # Minimum 1 step forward
+    if st.button("🔉 Pulse the Speaker (Scan History)"):
+        # Logic: Find every time A and B drew together
+        # Then see what 'A' drew with NEXT, and how long it took (The Height)
         
-    for _ in range(steps):
-        if current_draw == 'Lunchtime':
-            current_draw = 'Teatime'
-            # Date stays the same
+        # Flatten data for search
+        # (Assuming 'df' is loaded from the Merger or Scanner tab)
+        # We need the df here. If not loaded, warn user.
+        if 'df' not in locals():
+            st.error("Please upload your Master File in the Scanner Tab first!")
         else:
-            current_draw = 'Lunchtime'
-            current_date = current_date + timedelta(days=1)
+            matches = []
+            cols_check = [c for c in df.columns if c.startswith('N') or c == 'Bonus']
             
-    return current_date.strftime('%A %d %b'), current_draw
-
-if uploaded_file:
-    # Load Data
-    try:
-        if uploaded_file.name.endswith('.csv'):
-            df = pd.read_csv(uploaded_file)
-        else:
-            df = pd.read_excel(uploaded_file)
-        
-        # Ensure Date is datetime for calculations
-        df['Date'] = pd.to_datetime(df['Date'])
-        
-        st.success(f"Loaded {len(df)} draws successfully. Last Data Point: {df.iloc[-1]['Date'].strftime('%d %b %Y')}")
-        
-        # --- AUTOMATED SCANNER ---
-        st.divider()
-        st.subheader("🔬 Physics Scan Results (Live)")
-        
-        # User Input
-        target_num = st.number_input("Enter a Number to Audit (e.g. 16)", min_value=1, max_value=49, value=16)
-        
-        # Find hits
-        hits = []
-        cols_to_check = [c for c in df.columns if c.startswith('N') or c == 'Bonus']
-        
-        for idx, row in df.iterrows():
-            if target_num in row[cols_to_check].values:
-                hits.append(idx)
+            # 1. Find the Triggers
+            for i in range(len(df) - 1): # Stop 1 before end to look forward
+                row = df.iloc[i]
+                vals = row[cols_check].values
                 
-        if len(hits) < 3:
-            st.warning("Not enough data to calculate bounce (Need at least 3 hits in history).")
-        else:
-            # Get Indices
-            idx_last = hits[-1]
-            idx_prev = hits[-2]
-            idx_old = hits[-3]
-            
-            # Calculate Gaps
-            gap_new = idx_last - idx_prev
-            gap_old = idx_prev - idx_old
-            
-            # Get Dates
-            last_date = df.iloc[idx_last]['Date']
-            last_draw_name = df.iloc[idx_last]['Draw_Name']
-            
-            st.write(f"**Last Hit:** {last_date.strftime('%d %b')} ({last_draw_name})")
-            st.write(f"**Recent Sequence:** Gap {gap_old} ➔ Gap {gap_new}")
-            
-            # Physics Ratio
-            if gap_old > 0:
-                ratio = gap_new / gap_old
-                
-                st.metric("Decay Ratio", f"{ratio:.2f}")
-                
-                # Predict Next Gap
-                next_gap_float = gap_new * ratio
-                
-                # --- LOGIC ENGINE ---
-                
-                # 1. THE HOT ZONE (Widened to 1.1 to catch stable/accelerating)
-                if ratio <= 1.1:
-                    pred_date, pred_time = get_future_draw(last_date, last_draw_name, next_gap_float)
+                if trigger_1 in vals and trigger_2 in vals:
+                    # FOUND A TRIGGER PAIR
+                    # Now look forward to find the NEXT time 'Trigger 1' dropped
                     
-                    if ratio < 0.8:
-                        status = "🚀 ACCELERATING (Hot)"
-                        color = "red"
-                    else:
-                        status = "⚠️ STABLE / ROLLING (Watch List)"
-                        color = "orange"
+                    found_next = False
+                    for j in range(i + 1, len(df)):
+                        next_row = df.iloc[j]
+                        next_vals = next_row[cols_check].values
                         
-                    st.markdown(f":{color}[**{status}**]")
-                    st.write(f"Predicted Gap: {round(next_gap_float, 1)} draws")
-                    st.success(f"**Target:** {pred_date} ({pred_time})")
+                        if trigger_1 in next_vals:
+                            # It hit the speaker again!
+                            # Calculate Height (Gap)
+                            height = j - i
+                            
+                            # Who was the NEW partner? (The Harmonic)
+                            # Find neighbor numbers in that row
+                            partners = [x for x in next_vals if x != trigger_1 and x > 0]
+                            
+                            matches.append({
+                                "Date_Trigger": row['Date'],
+                                "Height (Draws)": height,
+                                "Next_Partner_List": partners
+                            })
+                            found_next = True
+                            break
                     
-                    if next_gap_float < 1.0:
-                        st.error("🚨 IMMINENT ALERT: Physics predicts a BACK-TO-BACK hit!")
+                    if not found_next:
+                        matches.append({
+                             "Date_Trigger": row['Date'],
+                             "Height (Draws)": "Still Bouncing...",
+                             "Next_Partner_List": []
+                        })
 
-                # 2. THE SLEEPER WAKE-UP (Ratio > 4.0)
-                elif ratio > 4.0:
-                    st.markdown(":blue[**💤 SLEEPER WAKE-UP (Anomaly)**]")
-                    st.info(f"Ratio {ratio:.1f} detected. This number just woke up from a long sleep.")
-                    st.warning("**Strategy:** Sleepers often 'Double Tap' to regain average. Play for a repeat in 1-3 draws.")
+            # 2. Analyze the Resonance
+            if len(matches) > 0:
+                st.write(f"Found {len(matches)} historical resonances for Pair {trigger_1}-{trigger_2}.")
+                
+                # Show details
+                total_height = 0
+                count = 0
+                partner_frequency = {}
+                
+                for m in matches:
+                    h = m['Height (Draws)']
+                    if isinstance(h, int):
+                        total_height += h
+                        count += 1
+                        
+                        # Count partners
+                        for p in m['Next_Partner_List']:
+                            partner_frequency[p] = partner_frequency.get(p, 0) + 1
+
+                if count > 0:
+                    avg_height = total_height / count
                     
-                # 3. THE COLD ZONE
+                    # Sort partners by frequency
+                    sorted_partners = sorted(partner_frequency.items(), key=lambda x: x[1], reverse=True)
+                    best_partner = sorted_partners[0][0] if sorted_partners else "None"
+                    
+                    st.subheader("📊 The Acoustic Report")
+                    
+                    c1, c2 = st.columns(2)
+                    c1.metric("Average Bounce Height", f"{avg_height:.1f} Draws", help="This is your DATE prediction.")
+                    c2.metric("Strongest Harmonic Echo", f"{best_partner}", help="This is the number most likely to pair with A next.")
+                    
+                    st.info(f"**Prediction:** Number {trigger_1} will return in approx **{round(avg_height)} draws**, likely paired with **{best_partner}**.")
+                    
+                    # Visualization of the Wave
+                    st.write("🌊 **Resonance Log:**")
+                    st.dataframe(pd.DataFrame(matches))
+                    
                 else:
-                    st.write("🔵 Decelerating (Going Cold). No immediate signal.")
-
+                    st.warning("This pair has appeared, but Number A hasn't landed again yet. It is currently mid-air.")
             else:
-                st.warning("Cannot calculate ratio (Previous gap was 0).")
-
-        st.divider()
-        st.caption("Latest 5 Draws in Data:")
-        st.dataframe(df.tail(5))
-        
-    except Exception as e:
-        st.error(f"Error reading file: {e}")
-        st.info("Make sure your CSV/Excel has columns: Date, N1...N6, Bonus, Draw_Name")
-
-else:
-    st.info("Waiting for file upload...")
+                st.error("This pair has never appeared together in your history file.")
