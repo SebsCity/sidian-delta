@@ -9,15 +9,48 @@ st.set_page_config(page_title="Sidian Precision Engine", page_icon="🎯", layou
 # --- CUSTOM STYLING ---
 st.markdown("""
     <style>
-    .big-font { font-size:24px !important; font-weight: bold; }
-    .oracle-date { color: #6200EA; font-size: 22px; font-weight: bold; }
-    .collision { background-color: #FFEBEE; padding: 10px; border-radius: 5px; border-left: 5px solid #FF1744; }
-    .normal { background-color: #F1F8E9; padding: 10px; border-radius: 5px; border-left: 5px solid #00C853; }
+    .big-font { font-size:20px !important; font-weight: bold; }
+    
+    /* HEATMAP STYLES */
+    .day-card {
+        border-radius: 10px;
+        padding: 15px;
+        margin: 10px 0;
+        border: 1px solid #ddd;
+        transition: transform 0.2s;
+    }
+    .day-card:hover { transform: scale(1.02); }
+    
+    .heat-low { background-color: #E8F5E9; border-left: 5px solid #43A047; } /* Green */
+    .heat-med { background-color: #FFFDE7; border-left: 5px solid #FDD835; } /* Yellow */
+    .heat-high { background-color: #FFEBEE; border-left: 5px solid #D32F2F; } /* Red */
+    
+    .date-header { font-size: 18px; font-weight: bold; margin-bottom: 5px; }
+    .draw-badge { 
+        display: inline-block; 
+        padding: 2px 8px; 
+        border-radius: 12px; 
+        font-size: 12px; 
+        font-weight: bold; 
+        color: white;
+        margin-left: 10px;
+    }
+    .lunch-badge { background-color: #FF9800; }
+    .tea-badge { background-color: #3F51B5; }
+    
+    .num-list { font-family: monospace; font-size: 16px; margin-top: 10px; }
+    .critical-alert { color: #D32F2F; font-weight: bold; animation: pulse 2s infinite; }
+    
+    @keyframes pulse {
+        0% { opacity: 1; }
+        50% { opacity: 0.6; }
+        100% { opacity: 1; }
+    }
     </style>
     """, unsafe_allow_html=True)
 
 st.title("🎯 The Sidian Precision Engine")
-st.markdown("System: **Radar**, **Lab**, **Squads**, **Partners**, **Groups**, and **The Universal Oracle**.")
+st.markdown("System: **Radar**, **Lab**, **Squads**, **Partners**, **Groups**, and **The Heatmap**.")
 
 # --- SIDEBAR: DATA LOADER ---
 with st.sidebar:
@@ -29,9 +62,6 @@ def calculate_landing_date(last_date, last_draw, draws_ahead):
     current_date = pd.to_datetime(last_date)
     current_draw = str(last_draw).strip()
     steps = int(round(draws_ahead))
-    
-    # If steps is 0 or negative (Overdue), we default to "NEXT DRAW" concept internally
-    # But for calculation, we project forward
     if steps < 1: steps = 1
     
     for _ in range(steps):
@@ -65,7 +95,7 @@ if uploaded_file:
             "⛓️ Squads", 
             "🤝 Partners",
             "🧩 Group Scan",
-            "🔮 UNIVERSAL ORACLE"
+            "🗓️ HEATMAP ORACLE"
         ])
 
         # ==================================================
@@ -87,13 +117,11 @@ if uploaded_file:
                         pred_gap = gap_new * ratio
                         idx_due = idx_last + pred_gap
                         draws_remaining = idx_due - (len(df)-1)
-                        
                         if draws_remaining < 2.5:
                             if ratio < 0.8: type_, prio = "🚀 Accelerating", 1
                             elif ratio > 1.2: type_, prio = "🛑 Decelerating", 2
                             elif ratio > 4.0: type_, prio = "💤 Sleeper", 1
                             else: type_, prio = "⚖️ Rolling", 3
-                            
                             p_date, p_time = calculate_landing_date(df.iloc[idx_last]['Date'], df.iloc[idx_last]['Draw_Name'], pred_gap)
                             candidates.append({"Number": num, "Type": type_, "Ratio": round(ratio,2), "Est. Arrival": f"{p_date.strftime('%d %b')} ({p_time})", "Priority": prio})
             if candidates:
@@ -187,98 +215,70 @@ if uploaded_file:
                 except: pass
 
         # ==================================================
-        # TAB 6: THE UNIVERSAL ORACLE (New!)
+        # TAB 6: HEATMAP ORACLE (Visual Update)
         # ==================================================
         with tab6:
-            st.subheader("🔮 The Universal Oracle (Flight Schedule)")
-            st.markdown("Calculates the Physics Trajectory for **ALL 49 NUMBERS** and groups them by their **Due Date**.")
+            st.subheader("🗓️ The Universal Flight Heatmap")
+            st.markdown("Visualizing the **Convergence Density** of all 49 numbers.")
             
-            if st.button("🔮 Generate Flight Schedule"):
-                
-                # Dictionary to hold the schedule: Key = "YYYY-MM-DD Time", Value = List of Numbers
+            if st.button("🔄 Generate Heatmap"):
                 schedule = {}
-                meta_data = {} # Stores details for tooltips
                 
-                # 1. SCAN ALL NUMBERS
+                # 1. PHYSICS CALCULATION
                 for num in range(1, 50):
                     hits = []
                     for idx, row in df.iterrows():
                         if num in row[cols].values: hits.append(idx)
                     
                     if len(hits) >= 3:
-                        idx_last = hits[-1]
-                        idx_prev = hits[-2]
-                        idx_old = hits[-3]
-                        
-                        gap_new = idx_last - idx_prev
-                        gap_old = idx_prev - idx_old
-                        
+                        idx_last = hits[-1]; idx_prev = hits[-2]; idx_old = hits[-3]
+                        gap_new = idx_last - idx_prev; gap_old = idx_prev - idx_old
                         if gap_old > 0:
                             ratio = gap_new / gap_old
                             pred_gap = gap_new * ratio
-                            
-                            # Calculate Date
                             p_date, p_time = calculate_landing_date(df.iloc[idx_last]['Date'], df.iloc[idx_last]['Draw_Name'], pred_gap)
                             
-                            # Create Key
-                            date_key = f"{p_date.strftime('%Y-%m-%d')} | {p_time}"
-                            
-                            # Add to Schedule
-                            if date_key not in schedule:
-                                schedule[date_key] = []
-                            
-                            schedule[date_key].append(num)
-                            
-                            # Store Meta Data
-                            meta_data[num] = {
-                                "Ratio": ratio,
-                                "Type": "Accelerating" if ratio < 0.8 else "Decelerating" if ratio > 1.2 else "Rolling"
-                            }
-                
-                # 2. DISPLAY RESULTS (Sorted by Date)
+                            key = f"{p_date.strftime('%Y-%m-%d')} | {p_time}"
+                            if key not in schedule: schedule[key] = []
+                            schedule[key].append(num)
+
+                # 2. RENDER HEATMAP
                 sorted_keys = sorted(schedule.keys())
-                
-                # Filter out past dates (Keep today and future)
                 today_str = df.iloc[-1]['Date'].strftime('%Y-%m-%d')
-                
-                st.divider()
                 
                 for key in sorted_keys:
                     date_part, time_part = key.split(" | ")
                     
-                    # Simple string comparison for filtering "Future/Today"
                     if date_part >= today_str:
                         nums = schedule[key]
                         count = len(nums)
                         
-                        # VISUAL LOGIC
-                        if count >= 3:
-                            style_class = "collision"
-                            icon = "🔥 CRITICAL CONVERGENCE"
+                        # Determine Heat Level
+                        if count >= 5:
+                            css_class = "heat-high"
+                            icon = "🔥 SUPER DRAW"
+                        elif count >= 3:
+                            css_class = "heat-med"
+                            icon = "⚠️ High Pressure"
                         else:
-                            style_class = "normal"
-                            icon = "🗓️ Schedule"
-                            
-                        # Pretty Date
-                        pretty_date = pd.to_datetime(date_part).strftime('%A %d %b')
+                            css_class = "heat-low"
+                            icon = "🌱 Stable"
                         
-                        st.markdown(f"""
-                        <div class="{style_class}">
-                            <div class="oracle-date">{icon}: {pretty_date} ({time_part})</div>
-                            Due Numbers: <b>{nums}</b>
+                        badge_class = "lunch-badge" if "Lunch" in time_part else "tea-badge"
+                        pretty_date = pd.to_datetime(date_part).strftime('%A, %d %b')
+                        
+                        # HTML Card
+                        html = f"""
+                        <div class="day-card {css_class}">
+                            <div class="date-header">
+                                {pretty_date} 
+                                <span class="draw-badge {badge_class}">{time_part}</span>
+                            </div>
+                            <div><strong>{icon}</strong> ({count} Due)</div>
+                            <div class="num-list">{str(nums)}</div>
                         </div>
-                        <br>
-                        """, unsafe_allow_html=True)
-                        
-                        # Expander for details
-                        with st.expander(f"View Physics Details for {pretty_date} ({time_part})"):
-                            det_cols = st.columns(len(nums))
-                            for i, n in enumerate(nums):
-                                info = meta_data[n]
-                                with det_cols[i % 3]: # Wrap cols
-                                    st.write(f"**#{n}**")
-                                    st.caption(f"{info['Type']}")
-                                    st.caption(f"Ratio: {info['Ratio']:.2f}")
+                        """
+                        st.markdown(html, unsafe_allow_html=True)
 
     except Exception as e:
         st.error(f"System Error: {e}")
