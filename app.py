@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-from datetime import timedelta
+from datetime import timedelta, datetime
 from itertools import combinations
 
 # --- PAGE CONFIGURATION ---
@@ -10,14 +10,14 @@ st.set_page_config(page_title="Sidian Precision Engine", page_icon="🎯", layou
 st.markdown("""
     <style>
     .big-font { font-size:24px !important; font-weight: bold; }
-    .signal { color: #FF4B4B; font-weight: bold; }
-    .partner { color: #00C853; font-weight: bold; }
-    .oracle { color: #AA00FF; font-weight: bold; font-size: 20px; }
+    .oracle-date { color: #6200EA; font-size: 22px; font-weight: bold; }
+    .collision { background-color: #FFEBEE; padding: 10px; border-radius: 5px; border-left: 5px solid #FF1744; }
+    .normal { background-color: #F1F8E9; padding: 10px; border-radius: 5px; border-left: 5px solid #00C853; }
     </style>
     """, unsafe_allow_html=True)
 
 st.title("🎯 The Sidian Precision Engine")
-st.markdown("Complete System: **Radar**, **Lab**, **Squads**, **Partners**, **Groups**, and **The Oracle**.")
+st.markdown("System: **Radar**, **Lab**, **Squads**, **Partners**, **Groups**, and **The Universal Oracle**.")
 
 # --- SIDEBAR: DATA LOADER ---
 with st.sidebar:
@@ -29,6 +29,9 @@ def calculate_landing_date(last_date, last_draw, draws_ahead):
     current_date = pd.to_datetime(last_date)
     current_draw = str(last_draw).strip()
     steps = int(round(draws_ahead))
+    
+    # If steps is 0 or negative (Overdue), we default to "NEXT DRAW" concept internally
+    # But for calculation, we project forward
     if steps < 1: steps = 1
     
     for _ in range(steps):
@@ -38,7 +41,7 @@ def calculate_landing_date(last_date, last_draw, draws_ahead):
             current_draw = 'Lunchtime'
             current_date = current_date + timedelta(days=1)
             
-    return current_date.strftime('%d %b %Y'), current_draw
+    return current_date, current_draw
 
 # --- MAIN SYSTEM ---
 if uploaded_file:
@@ -62,11 +65,11 @@ if uploaded_file:
             "⛓️ Squads", 
             "🤝 Partners",
             "🧩 Group Scan",
-            "🔮 THE ORACLE"
+            "🔮 UNIVERSAL ORACLE"
         ])
 
         # ==================================================
-        # TAB 1: THE RADAR
+        # TAB 1: RADAR
         # ==================================================
         with tab1:
             st.subheader("🔭 Individual Target Radar")
@@ -79,26 +82,27 @@ if uploaded_file:
                 if len(hits) >= 3:
                     idx_last = hits[-1]; idx_prev = hits[-2]; idx_old = hits[-3]
                     gap_new = idx_last - idx_prev; gap_old = idx_prev - idx_old
-                    draws_since = (len(df) - 1) - idx_last
-                    
                     if gap_old > 0:
                         ratio = gap_new / gap_old
                         pred_gap = gap_new * ratio
-                        remaining = pred_gap - draws_since
-                        if remaining < 2.5:
+                        idx_due = idx_last + pred_gap
+                        draws_remaining = idx_due - (len(df)-1)
+                        
+                        if draws_remaining < 2.5:
                             if ratio < 0.8: type_, prio = "🚀 Accelerating", 1
                             elif ratio > 1.2: type_, prio = "🛑 Decelerating", 2
                             elif ratio > 4.0: type_, prio = "💤 Sleeper", 1
                             else: type_, prio = "⚖️ Rolling", 3
+                            
                             p_date, p_time = calculate_landing_date(df.iloc[idx_last]['Date'], df.iloc[idx_last]['Draw_Name'], pred_gap)
-                            candidates.append({"Number": num, "Type": type_, "Ratio": round(ratio,2), "Est. Arrival": f"{p_date} ({p_time})", "Priority": prio})
+                            candidates.append({"Number": num, "Type": type_, "Ratio": round(ratio,2), "Est. Arrival": f"{p_date.strftime('%d %b')} ({p_time})", "Priority": prio})
             if candidates:
                 st.dataframe(pd.DataFrame(candidates).sort_values('Priority'), hide_index=True, use_container_width=True)
             else:
                 st.info("No immediate impact vectors found.")
 
         # ==================================================
-        # TAB 2: FORENSIC LAB
+        # TAB 2: LAB
         # ==================================================
         with tab2:
             st.subheader("🔬 Single Number Audit")
@@ -112,10 +116,10 @@ if uploaded_file:
                 ratio = gap_new / gap_old if gap_old > 0 else 0
                 pred_gap = gap_new * ratio
                 p_date, p_time = calculate_landing_date(df.iloc[idx_last]['Date'], df.iloc[idx_last]['Draw_Name'], pred_gap)
-                st.success(f"Target: {p_date} - {p_time}")
+                st.success(f"Target: {p_date.strftime('%d %b')} - {p_time}")
 
         # ==================================================
-        # TAB 3: SQUAD TRACKER
+        # TAB 3: SQUADS
         # ==================================================
         with tab3:
             st.subheader("⛓️ Squad & Cluster Detection")
@@ -135,11 +139,9 @@ if uploaded_file:
                 for s in squads:
                     st.error(f"🚨 CLUSTER: {s['Members']} (Origin: {s['Origin']})")
                     st.write(f"✅ Returned: {s['Returned']} | 🔥 **MISSING:** {s['Missing']}")
-            else:
-                st.success("No active squad triggers.")
 
         # ==================================================
-        # TAB 4: PARTNER PROTOCOL
+        # TAB 4: PARTNERS
         # ==================================================
         with tab4:
             st.subheader("🤝 The Partner Protocol")
@@ -163,7 +165,7 @@ if uploaded_file:
                 except: pass
 
         # ==================================================
-        # TAB 5: MULTIDIMENSIONAL SCAN
+        # TAB 5: GROUP SCAN
         # ==================================================
         with tab5:
             st.subheader("🧩 Group Scan")
@@ -171,8 +173,6 @@ if uploaded_file:
             if g_input:
                 try:
                     target_group = [int(x) for x in g_input.split() if x.isdigit()]
-                    st.write(f"Scanning: {target_group}")
-                    # 1. Joint History
                     joint_hits = []
                     for idx, row in df.iterrows():
                         if set(target_group).issubset(set(row[cols].values)): joint_hits.append(idx)
@@ -182,98 +182,103 @@ if uploaded_file:
                         ratio = gap_new / gap_old if gap_old > 0 else 1
                         pred_gap = gap_new * ratio
                         p_date, p_time = calculate_landing_date(df.iloc[joint_hits[-1]]['Date'], df.iloc[joint_hits[-1]]['Draw_Name'], pred_gap)
-                        st.success(f"💎 GROUP TARGET: **{p_date} ({p_time})**")
+                        st.success(f"💎 GROUP TARGET: **{p_date.strftime('%d %b')} ({p_time})**")
                     else: st.warning("Not enough joint history.")
                 except: pass
 
         # ==================================================
-        # TAB 6: THE ORACLE (New!)
+        # TAB 6: THE UNIVERSAL ORACLE (New!)
         # ==================================================
         with tab6:
-            st.subheader("🔮 The Probability Oracle")
-            st.markdown("Generates the **Top 3 Numbers** based on total historical Affinity with the previous draw.")
+            st.subheader("🔮 The Universal Oracle (Flight Schedule)")
+            st.markdown("Calculates the Physics Trajectory for **ALL 49 NUMBERS** and groups them by their **Due Date**.")
             
-            # Input: Target Date
-            target_date_input = st.date_input("Select Target Draw Date:")
-            
-            if st.button("🔮 Consult the Oracle"):
+            if st.button("🔮 Generate Flight Schedule"):
+                
+                # Dictionary to hold the schedule: Key = "YYYY-MM-DD Time", Value = List of Numbers
+                schedule = {}
+                meta_data = {} # Stores details for tooltips
+                
+                # 1. SCAN ALL NUMBERS
+                for num in range(1, 50):
+                    hits = []
+                    for idx, row in df.iterrows():
+                        if num in row[cols].values: hits.append(idx)
+                    
+                    if len(hits) >= 3:
+                        idx_last = hits[-1]
+                        idx_prev = hits[-2]
+                        idx_old = hits[-3]
+                        
+                        gap_new = idx_last - idx_prev
+                        gap_old = idx_prev - idx_old
+                        
+                        if gap_old > 0:
+                            ratio = gap_new / gap_old
+                            pred_gap = gap_new * ratio
+                            
+                            # Calculate Date
+                            p_date, p_time = calculate_landing_date(df.iloc[idx_last]['Date'], df.iloc[idx_last]['Draw_Name'], pred_gap)
+                            
+                            # Create Key
+                            date_key = f"{p_date.strftime('%Y-%m-%d')} | {p_time}"
+                            
+                            # Add to Schedule
+                            if date_key not in schedule:
+                                schedule[date_key] = []
+                            
+                            schedule[date_key].append(num)
+                            
+                            # Store Meta Data
+                            meta_data[num] = {
+                                "Ratio": ratio,
+                                "Type": "Accelerating" if ratio < 0.8 else "Decelerating" if ratio > 1.2 else "Rolling"
+                            }
+                
+                # 2. DISPLAY RESULTS (Sorted by Date)
+                sorted_keys = sorted(schedule.keys())
+                
+                # Filter out past dates (Keep today and future)
+                today_str = df.iloc[-1]['Date'].strftime('%Y-%m-%d')
+                
                 st.divider()
                 
-                # 1. Identify the Trigger (The previous draw)
-                # We assume the last row in the file is the 'Previous Draw' relative to prediction
-                last_row = df.iloc[-1]
-                trigger_nums = [x for x in last_row[cols].values if x > 0]
-                
-                st.write(f"**Trigger Draw:** {last_row['Date'].strftime('%d %b')} ({last_row['Draw_Name']})")
-                st.write(f"**Active Numbers (Scouts):** {trigger_nums}")
-                
-                # 2. Affinity Calculation
-                # For each number 1-49, how many times has it paired with ANY of the trigger numbers?
-                affinity_scores = {}
-                
-                # Initialize
-                for n in range(1, 50):
-                    affinity_scores[n] = 0
-                
-                # Scan History
-                for idx, row in df.iterrows():
-                    row_nums = set(row[cols].values)
+                for key in sorted_keys:
+                    date_part, time_part = key.split(" | ")
                     
-                    # Optimization: Only check rows that contain at least one Trigger Number
-                    # Intersection check
-                    if not row_nums.isdisjoint(set(trigger_nums)):
-                        # If a trigger number is present, who else is there?
-                        present_triggers = row_nums.intersection(set(trigger_nums))
+                    # Simple string comparison for filtering "Future/Today"
+                    if date_part >= today_str:
+                        nums = schedule[key]
+                        count = len(nums)
                         
-                        # Weight: If multiple triggers are present, the bond is stronger
-                        weight = len(present_triggers) 
+                        # VISUAL LOGIC
+                        if count >= 3:
+                            style_class = "collision"
+                            icon = "🔥 CRITICAL CONVERGENCE"
+                        else:
+                            style_class = "normal"
+                            icon = "🗓️ Schedule"
+                            
+                        # Pretty Date
+                        pretty_date = pd.to_datetime(date_part).strftime('%A %d %b')
                         
-                        for num in row_nums:
-                            if num > 0 and num not in present_triggers:
-                                affinity_scores[num] += weight
-                
-                # 3. Day of Week Adjustment
-                # Boost numbers that like this specific day (e.g., Tuesday)
-                target_day_name = target_date_input.strftime('%A')
-                st.caption(f"Applying **{target_day_name}** frequency weighting...")
-                
-                for idx, row in df.iterrows():
-                    if row['Date'].strftime('%A') == target_day_name:
-                         for num in row[cols].values:
-                             if num > 0:
-                                 # Small boost for Day of Week preference
-                                 affinity_scores[num] += 0.5
-
-                # 4. Sort and Predict
-                # Remove the trigger numbers themselves (unless we expect repeats)
-                # Usually we keep them as repeats are possible, but let's prioritize new numbers
-                
-                sorted_scores = sorted(affinity_scores.items(), key=lambda x: x[1], reverse=True)
-                
-                # Display Top 3
-                top_3 = sorted_scores[:3]
-                
-                st.markdown("### 🏆 The Oracle's Decree")
-                
-                c1, c2, c3 = st.columns(3)
-                
-                with c1:
-                    st.markdown(f"<div class='oracle'># {top_3[0][0]}</div>", unsafe_allow_html=True)
-                    st.caption(f"Affinity Score: {top_3[0][1]}")
-                    st.progress(1.0)
-                
-                with c2:
-                    st.markdown(f"<div class='oracle'># {top_3[1][0]}</div>", unsafe_allow_html=True)
-                    st.caption(f"Affinity Score: {top_3[1][1]}")
-                    st.progress(0.9)
-                    
-                with c3:
-                    st.markdown(f"<div class='oracle'># {top_3[2][0]}</div>", unsafe_allow_html=True)
-                    st.caption(f"Affinity Score: {top_3[2][1]}")
-                    st.progress(0.8)
-                
-                st.success(f"**Most Probable Line:** {top_3[0][0]} - {top_3[1][0]} - {top_3[2][0]}")
-                st.info("These numbers have the strongest historical magnetic connection to the numbers that just drew.")
+                        st.markdown(f"""
+                        <div class="{style_class}">
+                            <div class="oracle-date">{icon}: {pretty_date} ({time_part})</div>
+                            Due Numbers: <b>{nums}</b>
+                        </div>
+                        <br>
+                        """, unsafe_allow_html=True)
+                        
+                        # Expander for details
+                        with st.expander(f"View Physics Details for {pretty_date} ({time_part})"):
+                            det_cols = st.columns(len(nums))
+                            for i, n in enumerate(nums):
+                                info = meta_data[n]
+                                with det_cols[i % 3]: # Wrap cols
+                                    st.write(f"**#{n}**")
+                                    st.caption(f"{info['Type']}")
+                                    st.caption(f"Ratio: {info['Ratio']:.2f}")
 
     except Exception as e:
         st.error(f"System Error: {e}")
