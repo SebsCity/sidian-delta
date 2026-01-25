@@ -10,21 +10,23 @@ st.set_page_config(page_title="Sidian Precision Engine", page_icon="🎯", layou
 st.markdown("""
     <style>
     .big-font { font-size:20px !important; font-weight: bold; }
-    .day-card { border-radius: 10px; padding: 15px; margin: 10px 0; border: 1px solid #ddd; transition: transform 0.2s; }
-    .day-card:hover { transform: scale(1.02); }
-    .heat-low { background-color: #E8F5E9; border-left: 5px solid #43A047; }
-    .heat-med { background-color: #FFFDE7; border-left: 5px solid #FDD835; }
-    .heat-high { background-color: #FFEBEE; border-left: 5px solid #D32F2F; }
-    .date-header { font-size: 18px; font-weight: bold; margin-bottom: 5px; }
-    .draw-badge { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 12px; font-weight: bold; color: white; margin-left: 10px; }
-    .lunch-badge { background-color: #FF9800; }
-    .tea-badge { background-color: #3F51B5; }
-    .skip-beat { color: #2962FF; font-weight: bold; }
+    .oracle-card { 
+        background-color: #f9f9f9; 
+        padding: 20px; 
+        border-radius: 10px; 
+        border-left: 6px solid #2962FF; 
+        margin-bottom: 20px;
+        box-shadow: 2px 2px 10px rgba(0,0,0,0.1);
+    }
+    .cluster-header { color: #D32F2F; font-weight: bold; font-size: 18px; }
+    .skip-header { color: #2962FF; font-weight: bold; font-size: 18px; }
+    .why-text { font-style: italic; color: #555; margin-top: 5px; }
+    .note-text { font-size: 14px; color: #777; margin-top: 5px; }
     </style>
     """, unsafe_allow_html=True)
 
 st.title("🎯 The Sidian Precision Engine")
-st.markdown("System: **Radar**, **Lab**, **Squads**, **Partners**, **Groups**, and **The Rhythm Heatmap**.")
+st.markdown("System: **Radar**, **Lab**, **Squads**, **Partners**, and **The Monthly Focus Oracle**.")
 
 # --- SIDEBAR ---
 with st.sidebar:
@@ -60,23 +62,20 @@ if uploaded_file:
         cols = [c for c in df.columns if c.startswith('N') or c == 'Bonus']
         
         # TABS
-        tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["🔭 Radar", "🔬 Lab", "⛓️ Squads", "🤝 Partners", "🧩 Groups", "🗓️ RHYTHM HEATMAP"])
+        tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["🔭 Radar", "🔬 Lab", "⛓️ Squads", "🤝 Partners", "🧩 Groups", "🗓️ MONTHLY FOCUS"])
 
-        # (Tabs 1-5 Hidden for brevity - assume same logic as v6.0)
-        # ... [Insert previous Tabs 1-5 logic here if rewriting full file] ...
-        # For simplicity in this prompt, I will focus on the updated Tab 6 logic.
-        # You should keep Tabs 1-5 from the previous code block.
-
+        # (Existing Logic for Tabs 1-5 Hidden for brevity - assume Standard Sidian Logic)
         # ==================================================
-        # TAB 6: RHYTHM HEATMAP (Skip-Beat Update)
+        # TAB 6: MONTHLY FOCUS ORACLE (The Assistant Update)
         # ==================================================
         with tab6:
-            st.subheader("🗓️ The Universal Rhythm Heatmap")
-            st.markdown("Visualizing **Convergence** and **Skip-Beat Patterns**.")
+            st.subheader("🗓️ The Monthly Focus Oracle")
+            st.markdown("Generates detailed **Cluster** and **Skip-Beat** narratives for the entire month.")
             
-            if st.button("🔄 Generate Rhythm Schedule"):
+            if st.button("🔮 Generate Monthly Focus"):
                 schedule = {}
                 
+                # 1. RUN PHYSICS ON ALL NUMBERS
                 for num in range(1, 50):
                     hits = []
                     for idx, row in df.iterrows():
@@ -91,47 +90,73 @@ if uploaded_file:
                             pred_gap = gap_new * ratio
                             p_date, p_time = calculate_landing_date(df.iloc[idx_last]['Date'], df.iloc[idx_last]['Draw_Name'], pred_gap)
                             
-                            # SKIP-BEAT DETECTION
+                            # LOGIC: DETECT PATTERN
                             last_draw_name = df.iloc[idx_last]['Draw_Name']
                             is_skip = False
-                            if "Teatime" in str(last_draw_name) and "Teatime" in p_time: is_skip = True
-                            if "Lunchtime" in str(last_draw_name) and "Lunchtime" in p_time: is_skip = True
                             
+                            # Skip-Beat Logic (Tea->Tea OR Lunch->Lunch)
+                            if ("Teatime" in str(last_draw_name) and "Teatime" in p_time) or \
+                               ("Lunchtime" in str(last_draw_name) and "Lunchtime" in p_time):
+                                is_skip = True
+                            
+                            # Store Data
                             key = f"{p_date.strftime('%Y-%m-%d')} | {p_time}"
                             if key not in schedule: schedule[key] = []
-                            schedule[key].append({"Num": num, "Skip": is_skip})
+                            schedule[key].append({
+                                "Num": num, 
+                                "Skip": is_skip, 
+                                "Frequency": f"{last_draw_name}-to-{p_time}"
+                            })
 
-                # RENDER
+                # 2. GENERATE NARRATIVE OUTPUT
                 sorted_keys = sorted(schedule.keys())
                 today_str = df.iloc[-1]['Date'].strftime('%Y-%m-%d')
                 
+                # Filter for Next 30 Days
+                count_days = 0
+                
                 for key in sorted_keys:
                     date_part, time_part = key.split(" | ")
+                    
                     if date_part >= today_str:
                         items = schedule[key]
-                        nums_display = []
-                        for item in items:
-                            if item['Skip']:
-                                nums_display.append(f"{item['Num']} (🌊)")
+                        
+                        # Extract Lists
+                        all_nums = sorted([x['Num'] for x in items])
+                        skip_nums = sorted([x['Num'] for x in items if x['Skip']])
+                        freq_type = items[0]['Frequency'] if items else "Unknown"
+                        
+                        # Only show relevant days (High Activity)
+                        if len(all_nums) > 0:
+                            pretty_date = pd.to_datetime(date_part).strftime('%A %d %b')
+                            
+                            # Dynamic "Why" Generator
+                            why_msg = ""
+                            if skip_nums:
+                                why_msg = f"The physics engine sees that **{skip_nums}** are vibrating on a \"{freq_type}\" frequency. They are ignoring the noise of the in-between draw to hit this specific target."
                             else:
-                                nums_display.append(str(item['Num']))
-                        
-                        count = len(items)
-                        if count >= 5: css = "heat-high"; icon = "🔥 SUPER DRAW"
-                        elif count >= 3: css = "heat-med"; icon = "⚠️ High Pressure"
-                        else: css = "heat-low"; icon = "🌱 Stable"
-                        
-                        badge = "lunch-badge" if "Lunch" in time_part else "tea-badge"
-                        pretty_date = pd.to_datetime(date_part).strftime('%A, %d %b')
-                        
-                        st.markdown(f"""
-                        <div class="day-card {css}">
-                            <div class="date-header">{pretty_date} <span class="draw-badge {badge}">{time_part}</span></div>
-                            <div><strong>{icon}</strong> ({count} Due)</div>
-                            <div class="num-list">{', '.join(nums_display)}</div>
-                            <div style="font-size:12px; color:gray; margin-top:5px;">🌊 = Skip-Beat Rhythm Detected</div>
-                        </div>
-                        """, unsafe_allow_html=True)
-                        
+                                why_msg = f"Standard convergence detected. These numbers are resolving their individual gap ratios simultaneously."
+                                
+                            # Note Generator
+                            note_msg = ""
+                            if len(all_nums) >= 5:
+                                note_msg = "⚠️ **CRITICAL:** This is a High-Density Cluster. Expect a potential Jackpot Line."
+                            elif len(skip_nums) == len(all_nums):
+                                note_msg = "🌊 **PURE RHYTHM:** Every number here is a Skip-Beat. This is a highly stable lock."
+
+                            # HTML RENDER
+                            st.markdown(f"""
+                            <div class="oracle-card">
+                                <h3>{pretty_date} ({time_part})</h3>
+                                <div class="cluster-header">⚠️ The Cluster: {all_nums}</div>
+                                <div class="skip-header">🌊 The Skip-Beat: {skip_nums if skip_nums else "None"}</div>
+                                <div class="why-text"><b>Why?</b> {why_msg}</div>
+                                <div class="note-text">{note_msg}</div>
+                            </div>
+                            """, unsafe_allow_html=True)
+                            
+                            count_days += 1
+                            if count_days > 30: break # Cap at 30 entries
+
     except Exception as e:
         st.error(f"Error: {e}")
