@@ -2,36 +2,35 @@ import streamlit as st
 import pandas as pd
 from datetime import timedelta
 import calendar
+from collections import Counter
 
 # --- PAGE CONFIGURATION ---
-st.set_page_config(page_title="Sidian Precision Engine", page_icon="🧮", layout="wide")
+st.set_page_config(page_title="Sidian Precision Engine", page_icon="⚡", layout="wide")
 
 # --- CUSTOM CSS ---
 st.markdown("""
     <style>
     .big-font { font-size:20px !important; font-weight: bold; }
-    .algebra-card { 
-        background-color: #F3E5F5; 
-        border: 2px solid #8E24AA; 
+    .phenom-card { 
+        background-color: #FFF3E0; 
+        border: 2px solid #FF6F00; 
         border-radius: 10px; 
         padding: 15px; 
-        margin-bottom: 10px;
+        margin-bottom: 15px;
     }
-    .formula-text { font-family: monospace; font-size: 16px; color: #4A148C; }
-    .result-badge {
-        background-color: #8E24AA;
-        color: white;
-        padding: 5px 15px;
-        border-radius: 5px;
+    .best-duo {
+        background-color: #E8F5E9;
+        border-left: 5px solid #2E7D32;
+        padding: 10px;
+        margin-top: 5px;
         font-weight: bold;
-        font-size: 18px;
-        display: inline-block;
     }
+    .target-val { font-size: 24px; font-weight: bold; color: #D84315; }
     </style>
     """, unsafe_allow_html=True)
 
-st.title("🧮 The Sidian Algebraic Processor")
-st.markdown("System: **Physics**, **Rhythm**, **Magnetism**, **Tactics**, and **Positional Algebra**.")
+st.title("⚡ The Sidian Precision Engine")
+st.markdown("System: **Physics**, **Rhythm**, **Magnetism**, **Tactics**, and **The Probable Split**.")
 
 # --- SIDEBAR ---
 with st.sidebar:
@@ -73,103 +72,93 @@ if uploaded_file:
         
         # TABS
         tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9 = st.tabs([
-            "🔭 Radar", "🔬 Lab", "⛓️ Squads", "🤝 Partners", "🧩 Groups", "🗓️ ORACLE", "🧲 FIELDS", "⚽ TACTICS", "🧮 ALGEBRA"
+            "🔭 Radar", "🔬 Lab", "⛓️ Squads", "🤝 Partners", "🧩 Groups", "🗓️ ORACLE", "🧲 FIELDS", "⚽ TACTICS", "⚡ PHENOMENON"
         ])
 
         # (Tabs 1-8 Hidden - Keep Previous Logic)
 
         # ==================================================
-        # TAB 9: POSITIONAL ALGEBRA (The New Code Breaker)
+        # TAB 9: THE PHENOMENON (With Probability Filter)
         # ==================================================
         with tab9:
-            st.subheader("🧮 Positional Algebra Processor")
-            st.markdown("Solving the equation: **First**, **Last**, and **Bonus**.")
+            st.subheader("⚡ The Probable Split Calculator")
+            st.markdown("Calculates the **Target** and ranks the **Top 3 Duos** by historical strength.")
             
-            # Need Last 2 Draws
-            if len(df) >= 2:
-                # CURRENT DRAW (Last row)
-                curr_row = df.iloc[-1]
-                curr_nums = [int(x) for x in curr_row[cols].values if x > 0]
-                curr_n1 = curr_nums[0]
-                curr_n2 = curr_nums[1]
-                curr_n6 = curr_nums[-1]
-                curr_bonus = int(curr_row['Bonus'])
+            # Get Last Draw Data
+            last_row = df.iloc[-1]
+            if 'N6' in df.columns: n6 = int(last_row['N6'])
+            else: n6 = int(last_row[cols[-2]]) # Fallback
+            bonus = int(last_row['Bonus'])
+            
+            st.info(f"**INPUTS:** Last N6 = {n6} | Last Bonus = {bonus}")
+            
+            # --- HELPER: RANK DUOS ---
+            def get_best_duos(target_val, df_hist):
+                # 1. Generate all math pairs
+                possible_pairs = []
+                for i in range(1, 50):
+                    needed = target_val - i
+                    if needed > 0 and needed != i and needed < 50:
+                        pair = tuple(sorted((i, needed)))
+                        if pair not in possible_pairs: possible_pairs.append(pair)
                 
-                # PREVIOUS DRAW (2nd to last row)
-                prev_row = df.iloc[-2]
-                prev_nums = [int(x) for x in prev_row[cols].values if x > 0]
-                prev_n1 = prev_nums[0]
-                prev_n6 = prev_nums[-1]
+                # 2. Score them based on history (How often do they appear together?)
+                pair_scores = {}
+                for p in possible_pairs:
+                    count = 0
+                    # Scan last 500 draws for speed
+                    subset = df_hist.tail(500)
+                    for _, row in subset.iterrows():
+                        row_vals = set(row[cols].values)
+                        if p[0] in row_vals and p[1] in row_vals:
+                            count += 1
+                    pair_scores[p] = count
                 
-                st.info(f"**Analyzing Sequence:** {prev_row['Draw_Name']} ➡️ {curr_row['Draw_Name']}")
+                # Sort by frequency
+                sorted_pairs = sorted(pair_scores.items(), key=lambda x: x[1], reverse=True)
+                return sorted_pairs[:3] # Return top 3
 
-                # --- EQUATION 1: THE BRACKET (Prev N6 - Prev N1) ---
-                eq1_res = abs(prev_n6 - prev_n1)
+            c1, c2 = st.columns(2)
+            
+            # --- 1. PRODUCT RULE ---
+            with c1:
+                s_n6 = str(n6)
+                if len(s_n6) > 1: target_prod = int(s_n6[0]) * int(s_n6[1])
+                else: target_prod = n6
+                
                 st.markdown(f"""
-                <div class="algebra-card">
-                    <h4>1. The Bracket (Hold)</h4>
-                    <div class="formula-text">Equation: Prev N6 ({prev_n6}) - Prev N1 ({prev_n1})</div>
-                    <br>
-                    <div class="result-badge">Target: {eq1_res}</div>
+                <div class="phenom-card">
+                    <h4>Rule 1: The Product</h4>
+                    <div>Digits of {n6} multiplied</div>
+                    <div class="target-val">Target: {target_prod}</div>
                 </div>
                 """, unsafe_allow_html=True)
                 
-                # --- EQUATION 2: THE INTERNAL PRODUCT (Prev N6 Digits) ---
-                p_s = str(prev_n6)
-                if len(p_s) > 1:
-                    eq2_res = int(p_s[0]) * int(p_s[1])
-                else:
-                    eq2_res = prev_n6 # Single digit fallback
+                if target_prod >= 3:
+                    best_prod_duos = get_best_duos(target_prod, df)
+                    st.caption("🏆 Most Probable Splits (by History):")
+                    for duo, score in best_prod_duos:
+                        st.markdown(f"<div class='best-duo'>👉 {duo[0]} & {duo[1]} <small>(Seen {score} times)</small></div>", unsafe_allow_html=True)
+            
+            # --- 2. DIFFERENCE RULE ---
+            with c2:
+                target_diff = abs(n6 - bonus)
                 
                 st.markdown(f"""
-                <div class="algebra-card">
-                    <h4>2. The Internal Product (Split Check)</h4>
-                    <div class="formula-text">Equation: Digits of Prev N6 ({prev_n6}) multiplied</div>
-                    <br>
-                    <div class="result-badge">Target: {eq2_res}</div>
-                    <small>If {eq2_res} misses, look for its Split (e.g. 28 -> 6 & 22)</small>
+                <div class="phenom-card">
+                    <h4>Rule 2: The Difference</h4>
+                    <div>|{n6} - {bonus}|</div>
+                    <div class="target-val">Target: {target_diff}</div>
                 </div>
                 """, unsafe_allow_html=True)
+                
+                if target_diff >= 3:
+                    best_diff_duos = get_best_duos(target_diff, df)
+                    st.caption("🏆 Most Probable Splits (by History):")
+                    for duo, score in best_diff_duos:
+                        st.markdown(f"<div class='best-duo'>👉 {duo[0]} & {duo[1]} <small>(Seen {score} times)</small></div>", unsafe_allow_html=True)
 
-                # --- EQUATION 3: THE POWERBALL SOLVE (Bonus - Curr N6 Product) ---
-                c_s = str(curr_n6)
-                if len(c_s) > 1:
-                    curr_n6_prod = int(c_s[0]) * int(c_s[1])
-                else:
-                    curr_n6_prod = curr_n6
-                
-                eq3_res = abs(curr_bonus - curr_n6_prod)
-                
-                st.markdown(f"""
-                <div class="algebra-card">
-                    <h4>3. The Powerball Solve</h4>
-                    <div class="formula-text">Equation: Curr Bonus ({curr_bonus}) - (Digits of Curr N6 ({curr_n6}))</div>
-                    <div class="formula-text">Calculation: {curr_bonus} - {curr_n6_prod}</div>
-                    <br>
-                    <div class="result-badge">Target: {eq3_res}</div>
-                </div>
-                """, unsafe_allow_html=True)
-
-                # --- EQUATION 4: THE ANCHOR (Curr N6 + Curr N2) ---
-                eq4_res = curr_n6 + curr_n2
-                # Check for > 49 wrapping (though user didn't specify wrapping, usually Lotto implies subtraction if > 49 or just raw sum)
-                # User example: 41 + 6 = 47. 
-                
-                st.markdown(f"""
-                <div class="algebra-card">
-                    <h4>4. The Anchor Add</h4>
-                    <div class="formula-text">Equation: Curr N6 ({curr_n6}) + Curr N2 ({curr_n2})</div>
-                    <br>
-                    <div class="result-badge">Target: {eq4_res}</div>
-                </div>
-                """, unsafe_allow_html=True)
-                
-                # SUMMARY
-                st.divider()
-                st.success(f"**🧮 ALGEBRAIC PREDICTION:** {eq1_res}, {eq2_res}, {eq3_res}, {eq4_res}")
-                
-            else:
-                st.warning("Need at least 2 draws of history to run Algebra.")
+            st.success("✅ **STRATEGY:** Play the **#1 Ranked Duo** from both columns. These are mathematically valid AND historically proven.")
 
     except Exception as e:
         st.error(f"Error: {e}")
