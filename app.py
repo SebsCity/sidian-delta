@@ -1,220 +1,173 @@
 import streamlit as st
 import pandas as pd
-from datetime import timedelta
-import calendar
-from collections import Counter
 
-# --- PAGE CONFIGURATION ---
-st.set_page_config(page_title="Sidian Precision Engine", page_icon="⚡", layout="wide")
+# --- PAGE CONFIG ---
+st.set_page_config(page_title="Sidian Intersection Lab", page_icon="⚡", layout="wide")
 
-# --- CUSTOM CSS ---
+# --- CSS STYLING ---
 st.markdown("""
     <style>
-    .big-font { font-size:20px !important; font-weight: bold; }
-    .success-box { 
-        background-color: #E8F5E9; 
-        border: 2px solid #2E7D32; 
-        border-radius: 10px; 
-        padding: 15px; 
-        margin-bottom: 10px; 
-    }
-    .warning-box { 
-        background-color: #FFF3E0; 
-        border: 2px solid #EF6C00; 
-        border-radius: 10px; 
-        padding: 15px; 
-        margin-bottom: 10px; 
-    }
-    .danger-box { 
-        background-color: #FFEBEE; 
-        border: 2px solid #C62828; 
-        border-radius: 10px; 
-        padding: 15px; 
-        margin-bottom: 10px; 
-    }
-    .stat-metric { font-size: 24px; font-weight: bold; color: #1565C0; }
-    .best-duo {
-        background-color: #E3F2FD;
-        border-left: 5px solid #1565C0;
-        padding: 8px;
-        margin-top: 4px;
-        font-weight: bold;
-    }
+    .big-stat { font-size: 32px; font-weight: bold; color: #1E88E5; }
+    .win-card { background-color: #E8F5E9; border-left: 5px solid #2E7D32; padding: 15px; margin-bottom: 10px; }
+    .fail-card { background-color: #FFEBEE; border-left: 5px solid #C62828; padding: 15px; margin-bottom: 10px; }
+    .neutral-card { background-color: #F5F5F5; border-left: 5px solid #9E9E9E; padding: 15px; margin-bottom: 10px; }
+    .pred-box { background-color: #FFF3E0; border: 2px solid #FF9800; padding: 10px; border-radius: 5px; text-align: center; font-weight: bold; font-size: 18px; }
     </style>
-    """, unsafe_allow_html=True)
+""", unsafe_allow_html=True)
 
-st.title("⚡ The Sidian Precision Engine (Master v16.0)")
-st.markdown("**Status:** Systems Online. All Laws Validated.")
+st.title("⚡ The Sidian Intersection: Forensic Lab")
+st.markdown("""
+**The 'Unthinkable' Technique:** We trap the winning numbers between the **Bonus Gravity** (Same Unit) and the **N6 Magnetism** (Sum 11-18).
+""")
 
-# --- SIDEBAR ---
+# --- SIDEBAR: DATA LOAD ---
 with st.sidebar:
-    st.header("📂 Data Feed")
-    uploaded_file = st.file_uploader("Upload Master Sequence (Excel/CSV)", type=['csv', 'xlsx'])
-    st.divider()
-    split_mode = st.checkbox("🧩 Split Universes", value=True)
+    st.header("📂 1. Upload History")
+    uploaded_file = st.file_uploader("Upload 'The Full List' (CSV/Excel)", type=['csv', 'xlsx'])
 
-# --- HELPER ---
-def calculate_landing_date(last_date, last_draw, draws_ahead, use_split_logic):
-    current_date = pd.to_datetime(last_date)
-    current_draw = str(last_draw).strip()
-    steps = int(round(draws_ahead))
-    if steps < 1: steps = 1
-    for _ in range(steps):
-        if use_split_logic:
-            current_date = current_date + timedelta(days=1)
-        else:
-            if 'Lunchtime' in current_draw:
-                current_draw = 'Teatime'
-            else:
-                current_draw = 'Lunchtime'
-                current_date = current_date + timedelta(days=1)
-    return current_date, current_draw
+# --- LOGIC ENGINE ---
+def get_intersection_prediction(last_bonus, last_n6):
+    """
+    Returns (Status, PredictionList, Reason)
+    Status: 'OPEN' (Valid Prediction) or 'CLOSED' (Math doesn't work)
+    """
+    b_unit = int(last_bonus) % 10
+    n6_unit = int(last_n6) % 10
+    
+    # 1. Gravity Stream (All numbers ending in Bonus Unit)
+    gravity_stream = [n for n in range(1, 50) if n % 10 == b_unit]
+    
+    # 2. Magnetic Filter (Sum Rule)
+    # Check if this Unit + N6 Unit creates a valid bond (11-18)
+    bond_sum = b_unit + n6_unit
+    
+    if 11 <= bond_sum <= 18:
+        return "OPEN", gravity_stream, f"✅ Bond Active (Sum {bond_sum})"
+    else:
+        return "CLOSED", [], f"⛔ Bond Inactive (Sum {bond_sum} is outside 11-18)"
 
-def get_best_duos(target_val, df_hist, cols):
-    possible_pairs = []
-    for i in range(1, 50):
-        needed = target_val - i
-        if needed > 0 and needed != i and needed < 50:
-            pair = tuple(sorted((i, needed)))
-            if pair not in possible_pairs: possible_pairs.append(pair)
-    pair_scores = {}
-    for p in possible_pairs:
-        count = 0
-        subset = df_hist.tail(500)
-        for _, row in subset.iterrows():
-            row_vals = set(row[cols].values)
-            if p[0] in row_vals and p[1] in row_vals: count += 1
-        pair_scores[p] = count
-    return sorted(pair_scores.items(), key=lambda x: x[1], reverse=True)[:3]
-
-# --- MAIN ---
+# --- MAIN APP ---
 if uploaded_file:
+    # Load Data
     try:
         if uploaded_file.name.endswith('.csv'):
-            df = pd.read_csv(uploaded_file, sep='\t' if 'tsv' in uploaded_file.name else ',')
-            if len(df.columns) < 2: 
-                uploaded_file.seek(0)
-                df = pd.read_csv(uploaded_file, sep='\t')
+            df = pd.read_csv(uploaded_file)
         else:
             df = pd.read_excel(uploaded_file)
         
-        df['Date'] = pd.to_datetime(df['Date'])
-        cols = [c for c in df.columns if c.startswith('N') or c == 'Bonus']
+        # Clean Data
+        cols = ["N1", "N2", "N3", "N4", "N5", "N6", "Bonus"]
+        df = df.dropna(subset=cols)
+        for c in cols: df[c] = df[c].astype(int)
         
-        # TABS
-        tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9 = st.tabs([
-            "🔭 Radar", "🔬 Lab", "⛓️ Squads", "🤝 Partners", "🧩 Groups", "🗓️ ORACLE", "🧲 FIELDS", "⚽ TACTICS", "⚡ PHENOMENON"
-        ])
-
-        # (Tabs 1-8 Hidden for brevity)
-
-        # ==================================================
-        # TAB 9: THE MASTER PHENOMENON (INTEGRATED)
-        # ==================================================
-        with tab9:
-            st.subheader("⚡ The Phenomenon & Unit Law")
-            
-            # Get Last Draw Data
-            last_row = df.iloc[-1]
-            last_nums = [int(x) for x in last_row[cols].values if x > 0]
-            if 'N6' in df.columns: n6 = int(last_row['N6'])
-            else: n6 = last_nums[-1] 
-            bonus = int(last_row['Bonus'])
-            
-            st.info(f"**INPUTS:** Last N6 = {n6} | Last Bonus = {bonus}")
-            
-            # Layout
-            c1, c2, c3 = st.columns(3)
-
-            # --- 1. PRODUCT & DIFF TARGETS ---
+        # Tabs
+        tab1, tab2 = st.tabs(["🧪 Simulation & Practice", "📜 Backtest History"])
+        
+        # ==========================================
+        # TAB 1: PRACTICE SIMULATOR
+        # ==========================================
+        with tab1:
+            st.subheader("Manual Intersection Test")
+            c1, c2 = st.columns(2)
             with c1:
-                st.markdown("### 🎯 1. The Splits")
-                # Product
-                s_n6 = str(n6)
-                if len(s_n6) > 1: target_prod = int(s_n6[0]) * int(s_n6[1])
-                else: target_prod = n6
-                st.write(f"**Product Target:** {target_prod}")
-                if target_prod >= 3:
-                    best = get_best_duos(target_prod, df, cols)
-                    for duo, score in best:
-                        st.markdown(f"<div class='best-duo'>👉 {duo[0]} & {duo[1]}</div>", unsafe_allow_html=True)
-                
-                st.divider()
-                
-                # Difference
-                target_diff = abs(n6 - bonus)
-                st.write(f"**Difference Target:** {target_diff}")
-                if target_diff >= 3:
-                    best = get_best_duos(target_diff, df, cols)
-                    for duo, score in best:
-                        st.markdown(f"<div class='best-duo'>👉 {duo[0]} & {duo[1]}</div>", unsafe_allow_html=True)
-
-            # --- 2. THE PARENTS ---
+                in_bonus = st.number_input("Enter Bonus Ball", min_value=1, max_value=49, value=17)
             with c2:
-                st.markdown("### 👨‍👩‍👦 2. The Parents")
-                S = n6
-                s_str = str(n6)
-                if len(s_str) > 1: D = int(s_str[0]) + int(s_str[1])
-                else: D = n6
+                in_n6 = st.number_input("Enter N6 Ball", min_value=1, max_value=49, value=47)
+            
+            # Run Logic
+            status, preds, msg = get_intersection_prediction(in_bonus, in_n6)
+            
+            st.divider()
+            
+            if status == "OPEN":
+                st.success(f"INTERSECTION OPEN! {msg}")
+                st.markdown(f"### 🎯 Prediction Stream (Play These):")
+                st.markdown(f"<div class='pred-box'>{str(preds)}</div>", unsafe_allow_html=True)
                 
-                if (S + D) % 2 == 0:
-                    X = int((S + D) / 2)
-                    Y = int((S - D) / 2)
+                # Highlight the "Hot" ones (just heuristic for now based on conversation)
+                st.info("💡 **Tip:** Focus on the 'Mirror' (e.g., 7 & 37) or the 'High 40s' if available.")
+            else:
+                st.error(f"INTERSECTION CLOSED. {msg}")
+                st.warning("⚠️ **Strategy:** The Bonus Unit and N6 Unit do not attract. Do NOT use the Sidian Intersection for this draw. Use the Standard N6 Corridor instead.")
+
+        # ==========================================
+        # TAB 2: BACKTEST HISTORY
+        # ==========================================
+        with tab2:
+            st.subheader("Historical Success Rate")
+            
+            if st.button("Run Full Backtest"):
+                results = []
+                active_events = 0
+                hits = 0
+                
+                progress = st.progress(0)
+                
+                # Loop through history
+                # We look at Row i (Input) -> Row i+1 (Result)
+                for i in range(len(df) - 1):
+                    # Inputs
+                    prev_row = df.iloc[i]
+                    p_bonus = prev_row['Bonus']
+                    p_n6 = prev_row['N6']
+                    
+                    # Result (Target Draw)
+                    target_row = df.iloc[i+1]
+                    target_nums = set([target_row[c] for c in cols if c != 'Bonus']) # Exclude bonus from win check? Usually main set matches.
+                    target_nums_all = set([target_row[c] for c in cols])
+                    
+                    # Logic
+                    status, preds, reason = get_intersection_prediction(p_bonus, p_n6)
+                    
+                    if status == "OPEN":
+                        active_events += 1
+                        # Check Hit (Did ANY predicted number appear in the next draw?)
+                        # We usually check Main Set (N1-N6) for a win
+                        hit_nums = set(preds).intersection(target_nums)
+                        
+                        is_win = len(hit_nums) > 0
+                        if is_win: hits += 1
+                        
+                        results.append({
+                            "Draw Index": i,
+                            "Input": f"Bonus {p_bonus} / N6 {p_n6}",
+                            "Prediction": str(preds),
+                            "Result": "WIN" if is_win else "MISS",
+                            "Hit Numbers": str(list(hit_nums)) if is_win else "-"
+                        })
+                    
+                    if i % 100 == 0: progress.progress(i / len(df))
+                
+                progress.progress(100)
+                
+                # Display Stats
+                st.divider()
+                sc1, sc2, sc3 = st.columns(3)
+                sc1.metric("Total 'Open' Opportunities", active_events)
+                sc2.metric("Successful Predictions", hits)
+                if active_events > 0:
+                    rate = (hits / active_events) * 100
+                    sc3.metric("Success Rate", f"{rate:.1f}%")
+                
+                st.markdown("### 📝 Event Log (Last 50 Events)")
+                
+                # Show dataframe of results
+                res_df = pd.DataFrame(results)
+                # Sort by Draw Index Descending
+                res_df = res_df.sort_values(by="Draw Index", ascending=False).head(50)
+                
+                for _, row in res_df.iterrows():
+                    color_class = "win-card" if row['Result'] == "WIN" else "fail-card"
+                    icon = "✅" if row['Result'] == "WIN" else "❌"
                     st.markdown(f"""
-                    <div class="success-box">
-                        <h4>Calculated Parents:</h4>
-                        <div class="stat-metric">{X} & {Y}</div>
-                        <small>Likelihood: ~27% Direct Hit</small>
+                    <div class="{color_class}">
+                        <strong>{icon} {row['Result']}</strong> | {row['Input']} <br>
+                        Predicted: {row['Prediction']} <br>
+                        <em>Hits: {row['Hit Numbers']}</em>
                     </div>
                     """, unsafe_allow_html=True)
-                else:
-                    st.warning("No Integer Parents for this N6.")
-
-            # --- 3. THE UNIT SUM & SQUAD 30s ---
-            with c3:
-                st.markdown("### 🛡️ 3. The Unit Law")
-                
-                # Zone Logic
-                if n6 in [40, 41]:
-                    zone_css = "danger-box"
-                    zone_msg = "⛔ RED ZONE (40-41)"
-                    squad_msg = "DO NOT use Squad 34-39. Math impossible."
-                elif n6 in [42, 43]:
-                    zone_css = "warning-box"
-                    zone_msg = "⚠️ ORANGE ZONE (42-43)"
-                    squad_msg = "Risk High. Only check 38, 39."
-                elif n6 >= 44:
-                    zone_css = "success-box"
-                    zone_msg = "✅ GREEN ZONE (44-49)"
-                    squad_msg = "DEPLOY Squad 34-39. High Probability."
-                else:
-                    zone_css = "warning-box"
-                    zone_msg = "Unknown Zone (N6 < 40)"
-                    squad_msg = "Standard Unit Rules apply."
-
-                st.markdown(f"""
-                <div class="{zone_css}">
-                    <h4>{zone_msg}</h4>
-                    <div>{squad_msg}</div>
-                </div>
-                """, unsafe_allow_html=True)
-
-                # Calculate Valid Unit Partners
-                u6 = n6 % 10
-                min_u = 11 - u6
-                max_u = 18 - u6
-                valid_digits = [d for d in range(10) if min_u <= d <= max_u]
-                
-                if valid_digits:
-                    st.write(f"**Look for partners ending in:** {valid_digits}")
-                    # Show valid numbers
-                    matches = []
-                    for d in valid_digits:
-                        matches.extend([x for x in range(1, 50) if x % 10 == d])
-                    matches = sorted(matches)
-                    st.text_area("Valid Partners (Copy These):", str(matches).replace('[','').replace(']',''), height=100)
-                else:
-                    st.error("No valid unit partners exist (Red Zone).")
 
     except Exception as e:
-        st.error(f"Error: {e}")
+        st.error(f"Error processing file: {e}")
+else:
+    st.info("Waiting for data upload...")
