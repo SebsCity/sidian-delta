@@ -1,173 +1,212 @@
 import streamlit as st
 import pandas as pd
+import itertools
 
-# --- PAGE CONFIG ---
-st.set_page_config(page_title="Sidian Intersection Lab", page_icon="⚡", layout="wide")
-
-# --- CSS STYLING ---
+# --- CONFIGURATION & TITLE ---
+st.set_page_config(page_title="Lottery Forensics: The Construction Protocol", layout="wide")
+st.title("🕵️‍♂️ Lottery Forensics: The Master Protocol")
 st.markdown("""
-    <style>
-    .big-stat { font-size: 32px; font-weight: bold; color: #1E88E5; }
-    .win-card { background-color: #E8F5E9; border-left: 5px solid #2E7D32; padding: 15px; margin-bottom: 10px; }
-    .fail-card { background-color: #FFEBEE; border-left: 5px solid #C62828; padding: 15px; margin-bottom: 10px; }
-    .neutral-card { background-color: #F5F5F5; border-left: 5px solid #9E9E9E; padding: 15px; margin-bottom: 10px; }
-    .pred-box { background-color: #FFF3E0; border: 2px solid #FF9800; padding: 10px; border-radius: 5px; text-align: center; font-weight: bold; font-size: 18px; }
-    </style>
-""", unsafe_allow_html=True)
-
-st.title("⚡ The Sidian Intersection: Forensic Lab")
-st.markdown("""
-**The 'Unthinkable' Technique:** We trap the winning numbers between the **Bonus Gravity** (Same Unit) and the **N6 Magnetism** (Sum 11-18).
+**System Status:** Operational  
+**Strategy:** Unfazed (Debt) + Breadcrumbs (Spare Parts) + Intention (Next Move)  
+**Objective:** Detect the 'Sleight of Hand' and predict the 'Manifestation'.
 """)
 
-# --- SIDEBAR: DATA LOAD ---
-with st.sidebar:
-    st.header("📂 1. Upload History")
-    uploaded_file = st.file_uploader("Upload 'The Full List' (CSV/Excel)", type=['csv', 'xlsx'])
+# --- SIDEBAR: SETTINGS ---
+st.sidebar.header("⚙️ Configuration")
+uploaded_file = st.sidebar.file_uploader("Upload Lottery History (CSV/Excel)", type=["csv", "xlsx"])
+lookback_period = st.sidebar.slider("Backtest Range (Draws)", 10, 100, 50)
 
-# --- LOGIC ENGINE ---
-def get_intersection_prediction(last_bonus, last_n6):
-    """
-    Returns (Status, PredictionList, Reason)
-    Status: 'OPEN' (Valid Prediction) or 'CLOSED' (Math doesn't work)
-    """
-    b_unit = int(last_bonus) % 10
-    n6_unit = int(last_n6) % 10
-    
-    # 1. Gravity Stream (All numbers ending in Bonus Unit)
-    gravity_stream = [n for n in range(1, 50) if n % 10 == b_unit]
-    
-    # 2. Magnetic Filter (Sum Rule)
-    # Check if this Unit + N6 Unit creates a valid bond (11-18)
-    bond_sum = b_unit + n6_unit
-    
-    if 11 <= bond_sum <= 18:
-        return "OPEN", gravity_stream, f"✅ Bond Active (Sum {bond_sum})"
-    else:
-        return "CLOSED", [], f"⛔ Bond Inactive (Sum {bond_sum} is outside 11-18)"
+# --- LOGIC FUNCTIONS ---
 
-# --- MAIN APP ---
-if uploaded_file:
+def calculate_intention(row):
+    """
+    Calculates the 'Intention' for the NEXT draw based on N6 and Bonus.
+    Logic: 
+    1. Sum Intention (N6 + Bonus) -> Target Unit.
+    2. Gap Intention (|N6 - Bonus|) -> Target Number.
+    """
+    try:
+        n6 = int(row['N6'])
+        bonus = int(row['Bonus'])
+        
+        intention_sum = n6 + bonus
+        intention_unit = intention_sum % 10
+        intention_gap = abs(n6 - bonus)
+        
+        return {
+            "Intention Unit": intention_unit,
+            "Intention Gap": intention_gap,
+            "Raw Sum": intention_sum
+        }
+    except:
+        return None
+
+def find_unfazed_candidates(numbers, bonus):
+    """
+    Identifies 'Unfazed' numbers (Hidden Sums) in the current draw.
+    These are numbers the machine 'built' but didn't drop.
+    """
+    draw_set = set(numbers)
+    unfazed_counts = {}
+    
+    # Check all pairs in the draw (Construction via Addition)
+    for a, b in itertools.combinations(numbers, 2):
+        hidden_sum = a + b
+        if hidden_sum <= 49 and hidden_sum not in draw_set:
+            unfazed_counts[hidden_sum] = unfazed_counts.get(hidden_sum, 0) + 1
+            
+    # Check Difference with Bonus (Construction via Subtraction)
+    for n in numbers:
+        hidden_diff = abs(n - bonus)
+        if hidden_diff > 0 and hidden_diff not in draw_set:
+            unfazed_counts[hidden_diff] = unfazed_counts.get(hidden_diff, 0) + 1
+            
+    # Filter for strong signals (numbers that appear as calculations multiple times are 'Ghosts')
+    strong_candidates = [num for num, count in unfazed_counts.items()]
+    return strong_candidates
+
+def check_breadcrumbs(target, numbers, bonus):
+    """
+    Checks if the 'Breadcrumbs' (Spare Parts) exist to hide the Target again.
+    Returns: TRUE if parts exist (Machine can hide it), FALSE if parts missing (Machine must drop it).
+    """
+    # Check Addition parts
+    for a, b in itertools.combinations(numbers, 2):
+        if a + b == target:
+            return True, f"Found {a}+{b}"
+            
+    # Check Subtraction parts
+    for n in numbers:
+        if abs(n - target) in numbers: # e.g. If Target is 14, and we have 24 and 10 (24-10=14)
+            return True, f"Found subtraction pair for {target}"
+            
+    return False, "No Parts Found"
+
+# --- MAIN APP LOGIC ---
+
+if uploaded_file is not None:
     # Load Data
     try:
         if uploaded_file.name.endswith('.csv'):
             df = pd.read_csv(uploaded_file)
         else:
             df = pd.read_excel(uploaded_file)
-        
-        # Clean Data
-        cols = ["N1", "N2", "N3", "N4", "N5", "N6", "Bonus"]
-        df = df.dropna(subset=cols)
-        for c in cols: df[c] = df[c].astype(int)
-        
-        # Tabs
-        tab1, tab2 = st.tabs(["🧪 Simulation & Practice", "📜 Backtest History"])
-        
-        # ==========================================
-        # TAB 1: PRACTICE SIMULATOR
-        # ==========================================
-        with tab1:
-            st.subheader("Manual Intersection Test")
-            c1, c2 = st.columns(2)
-            with c1:
-                in_bonus = st.number_input("Enter Bonus Ball", min_value=1, max_value=49, value=17)
-            with c2:
-                in_n6 = st.number_input("Enter N6 Ball", min_value=1, max_value=49, value=47)
             
-            # Run Logic
-            status, preds, msg = get_intersection_prediction(in_bonus, in_n6)
+        # Standardize Columns (Ensure N1..N6, Bonus exist)
+        cols_needed = ['N1', 'N2', 'N3', 'N4', 'N5', 'N6', 'Bonus']
+        if not all(col in df.columns for col in cols_needed):
+            st.error(f"Data must contain columns: {cols_needed}")
+        else:
+            # --- ANALYSIS OF LATEST DRAW ---
+            st.header("🔮 Next Draw Prediction")
             
-            st.divider()
+            last_row = df.iloc[-1]
+            last_numbers = [last_row[c] for c in ['N1', 'N2', 'N3', 'N4', 'N5', 'N6']]
+            last_bonus = last_row['Bonus']
             
-            if status == "OPEN":
-                st.success(f"INTERSECTION OPEN! {msg}")
-                st.markdown(f"### 🎯 Prediction Stream (Play These):")
-                st.markdown(f"<div class='pred-box'>{str(preds)}</div>", unsafe_allow_html=True)
+            st.subheader(f"Latest Draw Analysis (Date: {last_row.get('Date', 'Unknown')})")
+            st.write(f"**Numbers Drawn:** {last_numbers} + **Bonus:** {last_bonus}")
+            
+            # 1. Determine Intention
+            intention = calculate_intention(last_row)
+            
+            # 2. Find Unfazed (The Debt)
+            unfazed_raw = find_unfazed_candidates(last_numbers, last_bonus)
+            
+            # 3. Filter by Breadcrumbs (The Construction Scan)
+            final_predictions = []
+            
+            col1, col2, col3 = st.columns(3)
+            
+            with col1:
+                st.markdown("### 1. The Intention")
+                st.info(f"**Target Unit:** {intention['Intention Unit']} (from Sum {intention['Raw Sum']})")
+                st.info(f"**Target Gap:** {intention['Intention Gap']} (from N6-Bonus)")
                 
-                # Highlight the "Hot" ones (just heuristic for now based on conversation)
-                st.info("💡 **Tip:** Focus on the 'Mirror' (e.g., 7 & 37) or the 'High 40s' if available.")
+            with col2:
+                st.markdown("### 2. The Unfazed (Ghosts)")
+                st.write(f"Hidden Sums Detected: {unfazed_raw[:5]}...")
+            
+            with col3:
+                st.markdown("### 3. The Breadcrumb Scan")
+                for target in unfazed_raw:
+                    # We prioritize numbers that match the Intention Unit or Intention Gap
+                    is_relevant = (target % 10 == intention['Intention Unit']) or (target == intention['Intention Gap'])
+                    
+                    if is_relevant:
+                        has_parts, reason = check_breadcrumbs(target, last_numbers, last_bonus)
+                        if not has_parts:
+                            st.success(f"**{target}**: NO PARTS FOUND (Must Drop) 🟢")
+                            final_predictions.append(target)
+                        else:
+                            st.warning(f"**{target}**: Parts Available ({reason}) 🔴")
+            
+            # --- FINAL BET GENERATION ---
+            st.markdown("---")
+            st.header("🎫 The Final Construction Ticket")
+            
+            if len(final_predictions) > 0:
+                # Add the Intention Unit as a safety
+                intention_play = [n for n in range(1, 50) if n % 10 == intention['Intention Unit']][:2]
+                
+                prediction_set = list(set(final_predictions + intention_play))
+                
+                # Generate Duos
+                duos = list(itertools.combinations(prediction_set, 2))
+                
+                st.write(f"**Bankers (Unfazed & Naked):** {final_predictions}")
+                st.write("**Top 3 Calculated Duos:**")
+                for i, duo in enumerate(duos[:3]):
+                    st.code(f"Bet {i+1}: {duo[0]} - {duo[1]}")
             else:
-                st.error(f"INTERSECTION CLOSED. {msg}")
-                st.warning("⚠️ **Strategy:** The Bonus Unit and N6 Unit do not attract. Do NOT use the Sidian Intersection for this draw. Use the Standard N6 Corridor instead.")
+                st.warning("System detects high 'Sleight of Hand' risk. No naked numbers found. Play the Intention Unit.")
 
-        # ==========================================
-        # TAB 2: BACKTEST HISTORY
-        # ==========================================
-        with tab2:
-            st.subheader("Historical Success Rate")
+            # --- BACKTESTING ---
+            st.markdown("---")
+            st.header("📊 Backtest: Does this Strategy Work?")
             
-            if st.button("Run Full Backtest"):
-                results = []
-                active_events = 0
+            if st.button("Run Backtest on Last 50 Draws"):
                 hits = 0
-                
-                progress = st.progress(0)
+                total = 0
+                log = []
                 
                 # Loop through history
-                # We look at Row i (Input) -> Row i+1 (Result)
-                for i in range(len(df) - 1):
-                    # Inputs
-                    prev_row = df.iloc[i]
-                    p_bonus = prev_row['Bonus']
-                    p_n6 = prev_row['N6']
+                for i in range(len(df) - lookback_period - 1, len(df) - 1):
+                    current_row = df.iloc[i]
+                    next_row = df.iloc[i+1]
                     
-                    # Result (Target Draw)
-                    target_row = df.iloc[i+1]
-                    target_nums = set([target_row[c] for c in cols if c != 'Bonus']) # Exclude bonus from win check? Usually main set matches.
-                    target_nums_all = set([target_row[c] for c in cols])
+                    # Run Strategy
+                    curr_nums = [current_row[c] for c in ['N1', 'N2', 'N3', 'N4', 'N5', 'N6']]
+                    curr_bonus = current_row['Bonus']
                     
-                    # Logic
-                    status, preds, reason = get_intersection_prediction(p_bonus, p_n6)
+                    intent = calculate_intention(current_row)
+                    candidates = find_unfazed_candidates(curr_nums, curr_bonus)
                     
-                    if status == "OPEN":
-                        active_events += 1
-                        # Check Hit (Did ANY predicted number appear in the next draw?)
-                        # We usually check Main Set (N1-N6) for a win
-                        hit_nums = set(preds).intersection(target_nums)
-                        
-                        is_win = len(hit_nums) > 0
-                        if is_win: hits += 1
-                        
-                        results.append({
-                            "Draw Index": i,
-                            "Input": f"Bonus {p_bonus} / N6 {p_n6}",
-                            "Prediction": str(preds),
-                            "Result": "WIN" if is_win else "MISS",
-                            "Hit Numbers": str(list(hit_nums)) if is_win else "-"
-                        })
+                    # Filter for 'No Breadcrumbs' + Matches Intention
+                    picks = []
+                    for cand in candidates:
+                        if (cand % 10 == intent['Intention Unit']) or (cand == intent['Intention Gap']):
+                             has_parts, _ = check_breadcrumbs(cand, curr_nums, curr_bonus)
+                             if not has_parts:
+                                 picks.append(cand)
                     
-                    if i % 100 == 0: progress.progress(i / len(df))
+                    # Check Result
+                    next_nums = [next_row[c] for c in ['N1', 'N2', 'N3', 'N4', 'N5', 'N6', 'Bonus']]
+                    hit_count = len(set(picks).intersection(set(next_nums)))
+                    
+                    if len(picks) > 0:
+                        total += 1
+                        if hit_count >= 1:
+                            hits += 1
+                            log.append(f"Draw {current_row.get('Date', i)}: Predicted {picks} -> HIT {hit_count} numbers")
                 
-                progress.progress(100)
-                
-                # Display Stats
-                st.divider()
-                sc1, sc2, sc3 = st.columns(3)
-                sc1.metric("Total 'Open' Opportunities", active_events)
-                sc2.metric("Successful Predictions", hits)
-                if active_events > 0:
-                    rate = (hits / active_events) * 100
-                    sc3.metric("Success Rate", f"{rate:.1f}%")
-                
-                st.markdown("### 📝 Event Log (Last 50 Events)")
-                
-                # Show dataframe of results
-                res_df = pd.DataFrame(results)
-                # Sort by Draw Index Descending
-                res_df = res_df.sort_values(by="Draw Index", ascending=False).head(50)
-                
-                for _, row in res_df.iterrows():
-                    color_class = "win-card" if row['Result'] == "WIN" else "fail-card"
-                    icon = "✅" if row['Result'] == "WIN" else "❌"
-                    st.markdown(f"""
-                    <div class="{color_class}">
-                        <strong>{icon} {row['Result']}</strong> | {row['Input']} <br>
-                        Predicted: {row['Prediction']} <br>
-                        <em>Hits: {row['Hit Numbers']}</em>
-                    </div>
-                    """, unsafe_allow_html=True)
+                st.metric("Strategy Win Rate (1+ Number Hit)", f"{round((hits/total)*100, 1)}%")
+                with st.expander("See Backtest Log"):
+                    for l in log:
+                        st.text(l)
 
     except Exception as e:
         st.error(f"Error processing file: {e}")
 else:
-    st.info("Waiting for data upload...")
+    st.info("Awaiting Data Upload... The machine is waiting.")
+
