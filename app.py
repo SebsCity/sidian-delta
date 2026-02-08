@@ -2,87 +2,91 @@ import streamlit as st
 import pandas as pd
 import itertools
 
-# --- CONFIGURATION & TITLE ---
-st.set_page_config(page_title="Lottery Forensics: The Construction Protocol", layout="wide")
-st.title("🕵️‍♂️ Lottery Forensics: The Master Protocol")
+# --- PAGE CONFIGURATION ---
+st.set_page_config(page_title="Lottery Dyno Test Protocol", layout="wide", page_icon="🏎️")
+
+st.title("🏎️ The Dyno Test Protocol")
 st.markdown("""
-**System Status:** Operational  
-**Strategy:** Unfazed (Debt) + Breadcrumbs (Spare Parts) + Intention (Next Move)  
-**Objective:** Detect the 'Sleight of Hand' and predict the 'Manifestation'.
+**System Status:** Ready for Testing  
+**Objective:** Stress-test lottery numbers before betting.  
+**Protocol:** 1. **Split Check:** Are the components (e.g., 3+4=7) exhausted?  
+2. **Neighbor Check:** Is the lane blocked by adjacent numbers?  
+3. **Gap Validation:** Is the number mathematically active in the current draw?
 """)
 
-# --- SIDEBAR: SETTINGS ---
-st.sidebar.header("⚙️ Configuration")
-uploaded_file = st.sidebar.file_uploader("Upload Lottery History (CSV/Excel)", type=["csv", "xlsx"])
-lookback_period = st.sidebar.slider("Backtest Range (Draws)", 10, 100, 50)
+# --- SIDEBAR ---
+st.sidebar.header("🔧 Garage Settings")
+uploaded_file = st.sidebar.file_uploader("Upload Draw History (CSV/Excel)", type=["csv", "xlsx"])
 
 # --- LOGIC FUNCTIONS ---
 
-def calculate_intention(row):
-    """
-    Calculates the 'Intention' for the NEXT draw based on N6 and Bonus.
-    Logic: 
-    1. Sum Intention (N6 + Bonus) -> Target Unit.
-    2. Gap Intention (|N6 - Bonus|) -> Target Number.
-    """
-    try:
-        n6 = int(row['N6'])
-        bonus = int(row['Bonus'])
-        
-        intention_sum = n6 + bonus
-        intention_unit = intention_sum % 10
-        intention_gap = abs(n6 - bonus)
-        
-        return {
-            "Intention Unit": intention_unit,
-            "Intention Gap": intention_gap,
-            "Raw Sum": intention_sum
-        }
-    except:
-        return None
+def get_last_draws(df, n=2):
+    """Returns the numbers from the last n draws as a flat list."""
+    recent_draws = df.tail(n)
+    numbers = []
+    for _, row in recent_draws.iterrows():
+        nums = [row[c] for c in ['N1', 'N2', 'N3', 'N4', 'N5', 'N6', 'Bonus']]
+        numbers.extend(nums)
+    return numbers, df.iloc[-1]
 
-def find_unfazed_candidates(numbers, bonus):
+def check_split_health(target, recent_numbers):
     """
-    Identifies 'Unfazed' numbers (Hidden Sums) in the current draw.
-    These are numbers the machine 'built' but didn't drop.
+    Step 1: Check if components (a+b=target) were just drawn.
+    If components are HOT, the number might be 'exhausted' (Red Light).
+    If components are COLD, the machine is forced to play the number (Green Light).
     """
-    draw_set = set(numbers)
-    unfazed_counts = {}
+    splits = []
+    # Find all pairs that sum to target
+    for i in range(1, target // 2 + 1):
+        j = target - i
+        if j != i and j <= 49:
+            splits.append((i, j))
+            
+    # Check if these components appear in recent history
+    used_splits = []
+    for a, b in splits:
+        if a in recent_numbers and b in recent_numbers:
+            used_splits.append(f"{a}+{b}")
     
-    # Check all pairs in the draw (Construction via Addition)
-    for a, b in itertools.combinations(numbers, 2):
-        hidden_sum = a + b
-        if hidden_sum <= 49 and hidden_sum not in draw_set:
-            unfazed_counts[hidden_sum] = unfazed_counts.get(hidden_sum, 0) + 1
-            
-    # Check Difference with Bonus (Construction via Subtraction)
-    for n in numbers:
-        hidden_diff = abs(n - bonus)
-        if hidden_diff > 0 and hidden_diff not in draw_set:
-            unfazed_counts[hidden_diff] = unfazed_counts.get(hidden_diff, 0) + 1
-            
-    # Filter for strong signals (numbers that appear as calculations multiple times are 'Ghosts')
-    strong_candidates = [num for num, count in unfazed_counts.items()]
-    return strong_candidates
+    if len(used_splits) > 0:
+        return False, f"CRITICAL: Components used ({', '.join(used_splits)})"
+    return True, "PASSED: Components are fresh."
 
-def check_breadcrumbs(target, numbers, bonus):
+def check_neighbor_traffic(target, recent_numbers):
     """
-    Checks if the 'Breadcrumbs' (Spare Parts) exist to hide the Target again.
-    Returns: TRUE if parts exist (Machine can hide it), FALSE if parts missing (Machine must drop it).
+    Step 2: Check if neighbors (Target-1, Target+1) are crowding the lane.
     """
-    # Check Addition parts
-    for a, b in itertools.combinations(numbers, 2):
-        if a + b == target:
-            return True, f"Found {a}+{b}"
-            
-    # Check Subtraction parts
-    for n in numbers:
-        if abs(n - target) in numbers: # e.g. If Target is 14, and we have 24 and 10 (24-10=14)
-            return True, f"Found subtraction pair for {target}"
-            
-    return False, "No Parts Found"
+    neighbors = [target - 1, target + 1]
+    clashes = [n for n in neighbors if n in recent_numbers]
+    
+    if len(clashes) > 0:
+        return False, f"WARNING: Lane blocked by {clashes}"
+    return True, "PASSED: Lane is clear."
 
-# --- MAIN APP LOGIC ---
+def check_gap_validation(target, last_row):
+    """
+    Step 3: Check if the number exists as a mathematical gap in the LATEST draw.
+    """
+    current_nums = sorted([int(last_row[c]) for c in ['N1', 'N2', 'N3', 'N4', 'N5', 'N6']])
+    bonus = int(last_row['Bonus'])
+    
+    gaps_found = []
+    
+    # Internal Gaps (N2-N1, etc.)
+    for i in range(len(current_nums) - 1):
+        diff = current_nums[i+1] - current_nums[i]
+        if diff == target:
+            gaps_found.append(f"Gap {current_nums[i+1]}-{current_nums[i]}")
+            
+    # Bonus Gap (N6 - Bonus or Bonus - N1 etc - usually N6-Bonus is strongest)
+    if abs(current_nums[-1] - bonus) == target:
+         gaps_found.append(f"Gap N6({current_nums[-1]})-Bonus({bonus})")
+         
+    if len(gaps_found) > 0:
+        return True, f"PASSED: Active Gap ({', '.join(gaps_found)})"
+    return False, "FAIL: No mathematical foundation in current draw."
+
+# --- MAIN APP ---
 
 if uploaded_file is not None:
     # Load Data
@@ -92,121 +96,94 @@ if uploaded_file is not None:
         else:
             df = pd.read_excel(uploaded_file)
             
-        # Standardize Columns (Ensure N1..N6, Bonus exist)
+        # Clean Data
         cols_needed = ['N1', 'N2', 'N3', 'N4', 'N5', 'N6', 'Bonus']
         if not all(col in df.columns for col in cols_needed):
-            st.error(f"Data must contain columns: {cols_needed}")
+            st.error(f"Data missing columns. Need: {cols_needed}")
         else:
-            # --- ANALYSIS OF LATEST DRAW ---
-            st.header("🔮 Next Draw Prediction")
-            
-            last_row = df.iloc[-1]
-            last_numbers = [last_row[c] for c in ['N1', 'N2', 'N3', 'N4', 'N5', 'N6']]
-            last_bonus = last_row['Bonus']
-            
-            st.subheader(f"Latest Draw Analysis (Date: {last_row.get('Date', 'Unknown')})")
-            st.write(f"**Numbers Drawn:** {last_numbers} + **Bonus:** {last_bonus}")
-            
-            # 1. Determine Intention
-            intention = calculate_intention(last_row)
-            
-            # 2. Find Unfazed (The Debt)
-            unfazed_raw = find_unfazed_candidates(last_numbers, last_bonus)
-            
-            # 3. Filter by Breadcrumbs (The Construction Scan)
-            final_predictions = []
-            
-            col1, col2, col3 = st.columns(3)
-            
-            with col1:
-                st.markdown("### 1. The Intention")
-                st.info(f"**Target Unit:** {intention['Intention Unit']} (from Sum {intention['Raw Sum']})")
-                st.info(f"**Target Gap:** {intention['Intention Gap']} (from N6-Bonus)")
-                
-            with col2:
-                st.markdown("### 2. The Unfazed (Ghosts)")
-                st.write(f"Hidden Sums Detected: {unfazed_raw[:5]}...")
-            
-            with col3:
-                st.markdown("### 3. The Breadcrumb Scan")
-                for target in unfazed_raw:
-                    # We prioritize numbers that match the Intention Unit or Intention Gap
-                    is_relevant = (target % 10 == intention['Intention Unit']) or (target == intention['Intention Gap'])
-                    
-                    if is_relevant:
-                        has_parts, reason = check_breadcrumbs(target, last_numbers, last_bonus)
-                        if not has_parts:
-                            st.success(f"**{target}**: NO PARTS FOUND (Must Drop) 🟢")
-                            final_predictions.append(target)
-                        else:
-                            st.warning(f"**{target}**: Parts Available ({reason}) 🔴")
-            
-            # --- FINAL BET GENERATION ---
-            st.markdown("---")
-            st.header("🎫 The Final Construction Ticket")
-            
-            if len(final_predictions) > 0:
-                # Add the Intention Unit as a safety
-                intention_play = [n for n in range(1, 50) if n % 10 == intention['Intention Unit']][:2]
-                
-                prediction_set = list(set(final_predictions + intention_play))
-                
-                # Generate Duos
-                duos = list(itertools.combinations(prediction_set, 2))
-                
-                st.write(f"**Bankers (Unfazed & Naked):** {final_predictions}")
-                st.write("**Top 3 Calculated Duos:**")
-                for i, duo in enumerate(duos[:3]):
-                    st.code(f"Bet {i+1}: {duo[0]} - {duo[1]}")
-            else:
-                st.warning("System detects high 'Sleight of Hand' risk. No naked numbers found. Play the Intention Unit.")
+            # Prepare Data
+            recent_pool, last_draw_row = get_last_draws(df, n=2)
+            last_draw_nums = [last_draw_row[c] for c in ['N1', 'N2', 'N3', 'N4', 'N5', 'N6']]
+            st.info(f"Loaded Last Draw: {last_draw_nums} + Bonus {last_draw_row['Bonus']}")
 
-            # --- BACKTESTING ---
-            st.markdown("---")
-            st.header("📊 Backtest: Does this Strategy Work?")
-            
-            if st.button("Run Backtest on Last 50 Draws"):
-                hits = 0
-                total = 0
-                log = []
+            # --- TAB INTERFACE ---
+            tab1, tab2 = st.tabs(["🧪 Manual Dyno Test", "🤖 Auto-Scan Protocol"])
+
+            with tab1:
+                st.subheader("Test a Specific Number")
+                user_num = st.number_input("Enter Number to Test (1-49)", min_value=1, max_value=49, value=7)
                 
-                # Loop through history
-                for i in range(len(df) - lookback_period - 1, len(df) - 1):
-                    current_row = df.iloc[i]
-                    next_row = df.iloc[i+1]
+                if st.button("Run Dyno Test"):
+                    col1, col2, col3 = st.columns(3)
                     
-                    # Run Strategy
-                    curr_nums = [current_row[c] for c in ['N1', 'N2', 'N3', 'N4', 'N5', 'N6']]
-                    curr_bonus = current_row['Bonus']
+                    # 1. Split Check
+                    s_pass, s_msg = check_split_health(user_num, recent_pool)
+                    with col1:
+                        st.markdown("### 1. Split Check")
+                        if s_pass:
+                            st.success(s_msg)
+                        else:
+                            st.error(s_msg)
+                            
+                    # 2. Neighbor Check
+                    n_pass, n_msg = check_neighbor_traffic(user_num, recent_pool)
+                    with col2:
+                        st.markdown("### 2. Neighbor Check")
+                        if n_pass:
+                            st.success(n_msg)
+                        else:
+                            st.warning(n_msg)
+                            
+                    # 3. Gap Check
+                    g_pass, g_msg = check_gap_validation(user_num, last_draw_row)
+                    with col3:
+                        st.markdown("### 3. Gap Validation")
+                        if g_pass:
+                            st.success(g_msg)
+                        else:
+                            st.error(g_msg)
                     
-                    intent = calculate_intention(current_row)
-                    candidates = find_unfazed_candidates(curr_nums, curr_bonus)
-                    
-                    # Filter for 'No Breadcrumbs' + Matches Intention
-                    picks = []
-                    for cand in candidates:
-                        if (cand % 10 == intent['Intention Unit']) or (cand == intent['Intention Gap']):
-                             has_parts, _ = check_breadcrumbs(cand, curr_nums, curr_bonus)
-                             if not has_parts:
-                                 picks.append(cand)
-                    
-                    # Check Result
-                    next_nums = [next_row[c] for c in ['N1', 'N2', 'N3', 'N4', 'N5', 'N6', 'Bonus']]
-                    hit_count = len(set(picks).intersection(set(next_nums)))
-                    
-                    if len(picks) > 0:
-                        total += 1
-                        if hit_count >= 1:
-                            hits += 1
-                            log.append(f"Draw {current_row.get('Date', i)}: Predicted {picks} -> HIT {hit_count} numbers")
+                    # Final Verdict
+                    st.markdown("---")
+                    score = sum([s_pass, n_pass, g_pass])
+                    if score == 3:
+                        st.balloons()
+                        st.success(f"✅ **RACE READY:** Number {user_num} passed all checks. High Probability.")
+                    elif score == 2:
+                        st.warning(f"⚠️ **CAUTION:** Number {user_num} has mechanical issues. Proceed with risk.")
+                    else:
+                        st.error(f"🛑 **DO NOT RACE:** Number {user_num} failed critical tests.")
+
+            with tab2:
+                st.subheader("Find Race-Ready Numbers")
+                st.write("Scanning all 49 numbers against the protocol...")
                 
-                st.metric("Strategy Win Rate (1+ Number Hit)", f"{round((hits/total)*100, 1)}%")
-                with st.expander("See Backtest Log"):
-                    for l in log:
-                        st.text(l)
+                green_light_nums = []
+                yellow_light_nums = []
+                
+                for num in range(1, 50):
+                    s_pass, _ = check_split_health(num, recent_pool)
+                    n_pass, _ = check_neighbor_traffic(num, recent_pool)
+                    g_pass, g_reason = check_gap_validation(num, last_draw_row)
+                    
+                    if s_pass and n_pass and g_pass:
+                        green_light_nums.append((num, g_reason))
+                    elif g_pass and (s_pass or n_pass):
+                        yellow_light_nums.append((num, g_reason))
+                
+                st.markdown("### 🟢 Green Light (Passed All Tests)")
+                if green_light_nums:
+                    for num, reason in green_light_nums:
+                        st.success(f"**Number {num}**: {reason}")
+                else:
+                    st.write("No perfect matches found.")
+                    
+                st.markdown("### 🟡 Yellow Light (Gap Validated, but crowded)")
+                if yellow_light_nums:
+                    for num, reason in yellow_light_nums:
+                        st.warning(f"**Number {num}**: {reason}")
+                else:
+                    st.write("No secondary matches found.")
 
     except Exception as e:
-        st.error(f"Error processing file: {e}")
-else:
-    st.info("Awaiting Data Upload... The machine is waiting.")
-
+        st.error(f"Error: {e}")
