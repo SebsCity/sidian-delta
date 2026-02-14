@@ -1,189 +1,199 @@
 import streamlit as st
 import pandas as pd
+import numpy as np
 import itertools
+from collections import Counter
+import matplotlib.pyplot as plt
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.multioutput import MultiOutputClassifier
+from sklearn.model_selection import train_test_split
 
-# --- PAGE CONFIGURATION ---
-st.set_page_config(page_title="Lottery Dyno Test Protocol", layout="wide", page_icon="🏎️")
+st.set_page_config(layout="wide")
 
-st.title("🏎️ The Dyno Test Protocol")
-st.markdown("""
-**System Status:** Ready for Testing  
-**Objective:** Stress-test lottery numbers before betting.  
-**Protocol:** 1. **Split Check:** Are the components (e.g., 3+4=7) exhausted?  
-2. **Neighbor Check:** Is the lane blocked by adjacent numbers?  
-3. **Gap Validation:** Is the number mathematically active in the current draw?
-""")
+st.title("🎯 Advanced Lotto Prediction Dashboard")
 
-# --- SIDEBAR ---
-st.sidebar.header("🔧 Garage Settings")
-uploaded_file = st.sidebar.file_uploader("Upload Draw History (CSV/Excel)", type=["csv", "xlsx"])
+# ==============================
+# FILE UPLOAD
+# ==============================
 
-# --- LOGIC FUNCTIONS ---
+uploaded_file = st.file_uploader("Upload Excel Lotto Sheet", type=["xlsx"])
 
-def get_last_draws(df, n=2):
-    """Returns the numbers from the last n draws as a flat list."""
-    recent_draws = df.tail(n)
-    numbers = []
-    for _, row in recent_draws.iterrows():
-        nums = [row[c] for c in ['N1', 'N2', 'N3', 'N4', 'N5', 'N6', 'Bonus']]
-        numbers.extend(nums)
-    return numbers, df.iloc[-1]
+if uploaded_file:
 
-def check_split_health(target, recent_numbers):
-    """
-    Step 1: Check if components (a+b=target) were just drawn.
-    If components are HOT, the number might be 'exhausted' (Red Light).
-    If components are COLD, the machine is forced to play the number (Green Light).
-    """
-    splits = []
-    # Find all pairs that sum to target
-    for i in range(1, target // 2 + 1):
-        j = target - i
-        if j != i and j <= 49:
-            splits.append((i, j))
-            
-    # Check if these components appear in recent history
-    used_splits = []
-    for a, b in splits:
-        if a in recent_numbers and b in recent_numbers:
-            used_splits.append(f"{a}+{b}")
-    
-    if len(used_splits) > 0:
-        return False, f"CRITICAL: Components used ({', '.join(used_splits)})"
-    return True, "PASSED: Components are fresh."
+    df = pd.read_excel(uploaded_file)
+    number_columns = df.columns[1:7]  # assumes first column is date
+    df_numbers = df[number_columns]
 
-def check_neighbor_traffic(target, recent_numbers):
-    """
-    Step 2: Check if neighbors (Target-1, Target+1) are crowding the lane.
-    """
-    neighbors = [target - 1, target + 1]
-    clashes = [n for n in neighbors if n in recent_numbers]
-    
-    if len(clashes) > 0:
-        return False, f"WARNING: Lane blocked by {clashes}"
-    return True, "PASSED: Lane is clear."
+    st.success("File loaded successfully!")
 
-def check_gap_validation(target, last_row):
-    """
-    Step 3: Check if the number exists as a mathematical gap in the LATEST draw.
-    """
-    current_nums = sorted([int(last_row[c]) for c in ['N1', 'N2', 'N3', 'N4', 'N5', 'N6']])
-    bonus = int(last_row['Bonus'])
-    
-    gaps_found = []
-    
-    # Internal Gaps (N2-N1, etc.)
-    for i in range(len(current_nums) - 1):
-        diff = current_nums[i+1] - current_nums[i]
-        if diff == target:
-            gaps_found.append(f"Gap {current_nums[i+1]}-{current_nums[i]}")
-            
-    # Bonus Gap (N6 - Bonus or Bonus - N1 etc - usually N6-Bonus is strongest)
-    if abs(current_nums[-1] - bonus) == target:
-         gaps_found.append(f"Gap N6({current_nums[-1]})-Bonus({bonus})")
-         
-    if len(gaps_found) > 0:
-        return True, f"PASSED: Active Gap ({', '.join(gaps_found)})"
-    return False, "FAIL: No mathematical foundation in current draw."
+    # ==============================
+    # FREQUENCY WEIGHTING
+    # ==============================
 
-# --- MAIN APP ---
+    def calculate_frequency(df, recent_weight=2):
+        all_numbers = df.values.flatten()
+        freq = Counter(all_numbers)
 
-if uploaded_file is not None:
-    # Load Data
-    try:
-        if uploaded_file.name.endswith('.csv'):
-            df = pd.read_csv(uploaded_file)
-        else:
-            df = pd.read_excel(uploaded_file)
-            
-        # Clean Data
-        cols_needed = ['N1', 'N2', 'N3', 'N4', 'N5', 'N6', 'Bonus']
-        if not all(col in df.columns for col in cols_needed):
-            st.error(f"Data missing columns. Need: {cols_needed}")
-        else:
-            # Prepare Data
-            recent_pool, last_draw_row = get_last_draws(df, n=2)
-            last_draw_nums = [last_draw_row[c] for c in ['N1', 'N2', 'N3', 'N4', 'N5', 'N6']]
-            st.info(f"Loaded Last Draw: {last_draw_nums} + Bonus {last_draw_row['Bonus']}")
+        recent_df = df.tail(20)
+        recent_numbers = recent_df.values.flatten()
+        recent_freq = Counter(recent_numbers)
 
-            # --- TAB INTERFACE ---
-            tab1, tab2 = st.tabs(["🧪 Manual Dyno Test", "🤖 Auto-Scan Protocol"])
+        for num in recent_freq:
+            freq[num] += recent_freq[num] * recent_weight
 
-            with tab1:
-                st.subheader("Test a Specific Number")
-                user_num = st.number_input("Enter Number to Test (1-49)", min_value=1, max_value=49, value=7)
-                
-                if st.button("Run Dyno Test"):
-                    col1, col2, col3 = st.columns(3)
-                    
-                    # 1. Split Check
-                    s_pass, s_msg = check_split_health(user_num, recent_pool)
-                    with col1:
-                        st.markdown("### 1. Split Check")
-                        if s_pass:
-                            st.success(s_msg)
-                        else:
-                            st.error(s_msg)
-                            
-                    # 2. Neighbor Check
-                    n_pass, n_msg = check_neighbor_traffic(user_num, recent_pool)
-                    with col2:
-                        st.markdown("### 2. Neighbor Check")
-                        if n_pass:
-                            st.success(n_msg)
-                        else:
-                            st.warning(n_msg)
-                            
-                    # 3. Gap Check
-                    g_pass, g_msg = check_gap_validation(user_num, last_draw_row)
-                    with col3:
-                        st.markdown("### 3. Gap Validation")
-                        if g_pass:
-                            st.success(g_msg)
-                        else:
-                            st.error(g_msg)
-                    
-                    # Final Verdict
-                    st.markdown("---")
-                    score = sum([s_pass, n_pass, g_pass])
-                    if score == 3:
-                        st.balloons()
-                        st.success(f"✅ **RACE READY:** Number {user_num} passed all checks. High Probability.")
-                    elif score == 2:
-                        st.warning(f"⚠️ **CAUTION:** Number {user_num} has mechanical issues. Proceed with risk.")
-                    else:
-                        st.error(f"🛑 **DO NOT RACE:** Number {user_num} failed critical tests.")
+        return freq
 
-            with tab2:
-                st.subheader("Find Race-Ready Numbers")
-                st.write("Scanning all 49 numbers against the protocol...")
-                
-                green_light_nums = []
-                yellow_light_nums = []
-                
-                for num in range(1, 50):
-                    s_pass, _ = check_split_health(num, recent_pool)
-                    n_pass, _ = check_neighbor_traffic(num, recent_pool)
-                    g_pass, g_reason = check_gap_validation(num, last_draw_row)
-                    
-                    if s_pass and n_pass and g_pass:
-                        green_light_nums.append((num, g_reason))
-                    elif g_pass and (s_pass or n_pass):
-                        yellow_light_nums.append((num, g_reason))
-                
-                st.markdown("### 🟢 Green Light (Passed All Tests)")
-                if green_light_nums:
-                    for num, reason in green_light_nums:
-                        st.success(f"**Number {num}**: {reason}")
-                else:
-                    st.write("No perfect matches found.")
-                    
-                st.markdown("### 🟡 Yellow Light (Gap Validated, but crowded)")
-                if yellow_light_nums:
-                    for num, reason in yellow_light_nums:
-                        st.warning(f"**Number {num}**: {reason}")
-                else:
-                    st.write("No secondary matches found.")
+    freq = calculate_frequency(df_numbers)
 
-    except Exception as e:
-        st.error(f"Error: {e}")
+    # ==============================
+    # HOT + REBOUND
+    # ==============================
+
+    last_draw = set(df_numbers.tail(1).values.flatten())
+    hot_numbers = sorted(freq, key=freq.get, reverse=True)[:15]
+    rebound = [n for n in hot_numbers if n not in last_draw][:12]
+
+    # ==============================
+    # PAIR STRENGTH
+    # ==============================
+
+    pair_counter = Counter()
+
+    for _, row in df_numbers.iterrows():
+        nums = sorted(row.values)
+        pairs = itertools.combinations(nums, 2)
+        pair_counter.update(pairs)
+
+    # ==============================
+    # GENERATE PRIMARY SET
+    # ==============================
+
+    scored_sets = []
+
+    for combo in itertools.combinations(rebound[:12], 6):
+        freq_score = sum(freq[n] for n in combo)
+        pair_score = sum(pair_counter.get(tuple(sorted(p)), 0)
+                         for p in itertools.combinations(combo, 2))
+        total = freq_score + pair_score
+        scored_sets.append((combo, total))
+
+    scored_sets.sort(key=lambda x: x[1], reverse=True)
+    primary_set = scored_sets[0][0]
+
+    # ==============================
+    # STRONGEST 3
+    # ==============================
+
+    trio_scores = []
+
+    for trio in itertools.combinations(primary_set, 3):
+        freq_score = sum(freq[n] for n in trio)
+        pair_score = sum(pair_counter.get(tuple(sorted(p)), 0)
+                         for p in itertools.combinations(trio, 2))
+        trio_scores.append((trio, freq_score + pair_score))
+
+    trio_scores.sort(key=lambda x: x[1], reverse=True)
+    best_three = trio_scores[0][0]
+
+    # ==============================
+    # MACHINE LEARNING MODEL
+    # ==============================
+
+    max_number = int(df_numbers.max().max())
+
+    def create_ml_dataset(df):
+        X = []
+        y = []
+
+        for i in range(len(df) - 1):
+            current_draw = df.iloc[i].values
+            next_draw = df.iloc[i + 1].values
+
+            feature_vector = np.zeros(max_number)
+            for n in current_draw:
+                feature_vector[n - 1] = 1
+
+            target_vector = np.zeros(max_number)
+            for n in next_draw:
+                target_vector[n - 1] = 1
+
+            X.append(feature_vector)
+            y.append(target_vector)
+
+        return np.array(X), np.array(y)
+
+    X, y = create_ml_dataset(df_numbers)
+
+    if len(X) > 10:
+        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, shuffle=False)
+
+        model = MultiOutputClassifier(RandomForestClassifier(n_estimators=200))
+        model.fit(X_train, y_train)
+
+        ml_probs = model.predict_proba([X[-1]])
+
+        prob_scores = []
+        for i in range(len(ml_probs)):
+            prob_scores.append(ml_probs[i][0][1])
+
+        ml_prediction = np.argsort(prob_scores)[-6:] + 1
+    else:
+        ml_prediction = []
+
+    # ==============================
+    # BACKTEST TRACKER
+    # ==============================
+
+    def backtest(df, window=50):
+        hits = []
+
+        for i in range(window, len(df) - 1):
+            train_df = df.iloc[:i]
+            test_draw = set(df.iloc[i + 1].values)
+
+            freq_local = calculate_frequency(train_df)
+            hot_local = sorted(freq_local, key=freq_local.get, reverse=True)[:6]
+
+            predicted = set(hot_local)
+            hit_count = len(predicted.intersection(test_draw))
+            hits.append(hit_count)
+
+        return hits
+
+    if len(df_numbers) > 60:
+        hit_results = backtest(df_numbers)
+        avg_hits = np.mean(hit_results)
+    else:
+        hit_results = []
+        avg_hits = 0
+
+    # ==============================
+    # HEATMAP VISUALIZATION
+    # ==============================
+
+    freq_df = pd.DataFrame.from_dict(freq, orient="index", columns=["Frequency"])
+    freq_df = freq_df.sort_index()
+
+    fig, ax = plt.subplots()
+    heat_data = np.array(freq_df["Frequency"]).reshape(1, -1)
+    ax.imshow(heat_data)
+    ax.set_yticks([])
+    ax.set_xticks(range(len(freq_df.index)))
+    ax.set_xticklabels(freq_df.index, rotation=90)
+    st.pyplot(fig)
+
+    # ==============================
+    # DISPLAY RESULTS
+    # ==============================
+
+    st.subheader("🎯 Primary 6-Number Set")
+    st.write(sorted(primary_set))
+
+    st.subheader("🔥 Strongest 3")
+    st.write(sorted(best_three))
+
+    st.subheader("🤖 ML Suggested 6")
+    st.write(sorted(ml_prediction))
+
+    st.subheader("📊 Backtest Average Hits (Hot Model)")
+    st.write(round(avg_hits, 2))
