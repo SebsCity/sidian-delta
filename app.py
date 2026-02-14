@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import itertools
+import random
 from collections import Counter
 import matplotlib.pyplot as plt
 from sklearn.ensemble import RandomForestClassifier
@@ -9,19 +10,14 @@ from sklearn.multioutput import MultiOutputClassifier
 from sklearn.model_selection import train_test_split
 
 st.set_page_config(layout="wide")
-
-st.title("🎯 Advanced Lotto Prediction Dashboard")
-
-# ==============================
-# FILE UPLOAD
-# ==============================
+st.title("🎯 Structured Lotto Prediction Engine")
 
 uploaded_file = st.file_uploader("Upload Excel Lotto Sheet", type=["xlsx"])
 
 if uploaded_file:
 
     df = pd.read_excel(uploaded_file)
-    number_columns = df.columns[1:7]  # assumes first column is date
+    number_columns = df.columns[1:7]
     df_numbers = df[number_columns]
 
     st.success("File loaded successfully!")
@@ -74,8 +70,7 @@ if uploaded_file:
         freq_score = sum(freq[n] for n in combo)
         pair_score = sum(pair_counter.get(tuple(sorted(p)), 0)
                          for p in itertools.combinations(combo, 2))
-        total = freq_score + pair_score
-        scored_sets.append((combo, total))
+        scored_sets.append((combo, freq_score + pair_score))
 
     scored_sets.sort(key=lambda x: x[1], reverse=True)
     primary_set = scored_sets[0][0]
@@ -102,8 +97,7 @@ if uploaded_file:
     max_number = int(df_numbers.max().max())
 
     def create_ml_dataset(df):
-        X = []
-        y = []
+        X, y = [], []
 
         for i in range(len(df) - 1):
             current_draw = df.iloc[i].values
@@ -131,56 +125,103 @@ if uploaded_file:
         model.fit(X_train, y_train)
 
         ml_probs = model.predict_proba([X[-1]])
-
-        prob_scores = []
-        for i in range(len(ml_probs)):
-            prob_scores.append(ml_probs[i][0][1])
-
+        prob_scores = [ml_probs[i][0][1] for i in range(len(ml_probs))]
         ml_prediction = np.argsort(prob_scores)[-6:] + 1
     else:
         ml_prediction = []
 
     # ==============================
-    # BACKTEST TRACKER
+    # MODEL VS RANDOM BACKTEST
     # ==============================
 
-    def backtest(df, window=50):
-        hits = []
+    def evaluate_prediction(predicted_set, actual_set):
+        return len(set(predicted_set).intersection(set(actual_set)))
 
-        for i in range(window, len(df) - 1):
-            train_df = df.iloc[:i]
-            test_draw = set(df.iloc[i + 1].values)
+    def rolling_backtest(df_numbers, window=50):
+
+        model_hits = []
+        random_hits = []
+
+        for i in range(window, len(df_numbers) - 1):
+
+            train_df = df_numbers.iloc[:i]
+            actual_next = df_numbers.iloc[i + 1].values
 
             freq_local = calculate_frequency(train_df)
             hot_local = sorted(freq_local, key=freq_local.get, reverse=True)[:6]
+            model_pred = hot_local
 
-            predicted = set(hot_local)
-            hit_count = len(predicted.intersection(test_draw))
-            hits.append(hit_count)
+            max_num = int(df_numbers.max().max())
+            random_pred = random.sample(range(1, max_num + 1), 6)
 
-        return hits
+            model_hits.append(evaluate_prediction(model_pred, actual_next))
+            random_hits.append(evaluate_prediction(random_pred, actual_next))
+
+        return model_hits, random_hits
 
     if len(df_numbers) > 60:
-        hit_results = backtest(df_numbers)
-        avg_hits = np.mean(hit_results)
-    else:
-        hit_results = []
-        avg_hits = 0
+
+        model_hits, random_hits = rolling_backtest(df_numbers)
+
+        avg_model = np.mean(model_hits)
+        avg_random = np.mean(random_hits)
+
+        st.subheader("📊 Performance Comparison")
+
+        col1, col2 = st.columns(2)
+
+        col1.metric("Model Avg Hits", round(avg_model, 3))
+        col2.metric("Random Avg Hits", round(avg_random, 3))
+
+        model_2plus = np.mean([1 if h >= 2 else 0 for h in model_hits]) * 100
+        random_2plus = np.mean([1 if h >= 2 else 0 for h in random_hits]) * 100
+
+        st.write(f"Model ≥2 Hits: {model_2plus:.2f}%")
+        st.write(f"Random ≥2 Hits: {random_2plus:.2f}%")
+
+        model_3plus = np.mean([1 if h >= 3 else 0 for h in model_hits]) * 100
+        random_3plus = np.mean([1 if h >= 3 else 0 for h in random_hits]) * 100
+
+        st.write(f"Model ≥3 Hits: {model_3plus:.2f}%")
+        st.write(f"Random ≥3 Hits: {random_3plus:.2f}%")
+
+        # Hit Distribution
+        st.subheader("📈 Hit Distribution")
+
+        fig, ax = plt.subplots()
+        ax.hist(model_hits, bins=range(0, 8), alpha=0.6, label="Model")
+        ax.hist(random_hits, bins=range(0, 8), alpha=0.6, label="Random")
+        ax.legend()
+        st.pyplot(fig)
+
+        # Rolling 10-draw comparison
+        st.subheader("📉 Rolling 10-Draw Average")
+
+        rolling_model = pd.Series(model_hits).rolling(10).mean()
+        rolling_random = pd.Series(random_hits).rolling(10).mean()
+
+        fig2, ax2 = plt.subplots()
+        ax2.plot(rolling_model, label="Model")
+        ax2.plot(rolling_random, label="Random")
+        ax2.legend()
+        st.pyplot(fig2)
 
     # ==============================
-    # HEATMAP VISUALIZATION
+    # HEATMAP
     # ==============================
+
+    st.subheader("🔥 Frequency Heatmap")
 
     freq_df = pd.DataFrame.from_dict(freq, orient="index", columns=["Frequency"])
     freq_df = freq_df.sort_index()
 
-    fig, ax = plt.subplots()
+    fig3, ax3 = plt.subplots()
     heat_data = np.array(freq_df["Frequency"]).reshape(1, -1)
-    ax.imshow(heat_data)
-    ax.set_yticks([])
-    ax.set_xticks(range(len(freq_df.index)))
-    ax.set_xticklabels(freq_df.index, rotation=90)
-    st.pyplot(fig)
+    ax3.imshow(heat_data)
+    ax3.set_yticks([])
+    ax3.set_xticks(range(len(freq_df.index)))
+    ax3.set_xticklabels(freq_df.index, rotation=90)
+    st.pyplot(fig3)
 
     # ==============================
     # DISPLAY RESULTS
@@ -194,6 +235,3 @@ if uploaded_file:
 
     st.subheader("🤖 ML Suggested 6")
     st.write(sorted(ml_prediction))
-
-    st.subheader("📊 Backtest Average Hits (Hot Model)")
-    st.write(round(avg_hits, 2))
