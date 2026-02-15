@@ -1,200 +1,219 @@
-
 import streamlit as st
 import pandas as pd
 import numpy as np
 import itertools
 from collections import Counter
-import matplotlib.pyplot as plt
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.multioutput import MultiOutputClassifier
 from sklearn.model_selection import train_test_split
 
 st.set_page_config(layout="wide")
-
-st.title("🎯 Advanced Lotto Prediction Dashboard")
+st.title("🎯 Lotto Prediction Engine V2.0 (1–49 + Bonus)")
 
 # ==============================
 # FILE UPLOAD
 # ==============================
-
 uploaded_file = st.file_uploader("Upload Excel Lotto Sheet", type=["xlsx"])
 
 if uploaded_file:
-
     df = pd.read_excel(uploaded_file)
-    number_columns = df.columns[1:7]  # assumes first column is date
-    df_numbers = df[number_columns]
 
-    st.success("File loaded successfully!")
+    main_cols = df.columns[1:7]      # 6 main numbers
+    bonus_col = df.columns[7]       # bonus column
 
-    # ==============================
-    # FREQUENCY WEIGHTING
-    # ==============================
+    df_main = df[main_cols]
+    df_bonus = df[[bonus_col]]
 
-    def calculate_frequency(df, recent_weight=2):
-        all_numbers = df.values.flatten()
-        freq = Counter(all_numbers)
+    st.success("File Loaded Successfully!")
 
-        recent_df = df.tail(20)
-        recent_numbers = recent_df.values.flatten()
-        recent_freq = Counter(recent_numbers)
+    MAX_NUMBER = 49
+    MID = 25
 
-        for num in recent_freq:
-            freq[num] += recent_freq[num] * recent_weight
-
+# ==============================
+# FREQUENCY
+# ==============================
+    def calculate_frequency(df):
+        freq = Counter(df.values.flatten())
         return freq
 
-    freq = calculate_frequency(df_numbers)
+# ==============================
+# DELAY
+# ==============================
+    def calculate_delay(df):
+        delay = {}
+        for num in range(1, MAX_NUMBER + 1):
+            appearances = df[df.isin([num]).any(axis=1)]
+            if not appearances.empty:
+                last_seen = appearances.index.max()
+                delay[num] = len(df) - last_seen
+            else:
+                delay[num] = len(df)
+        return delay
 
-    # ==============================
-    # HOT + REBOUND
-    # ==============================
+# ==============================
+# ML DATASET (Rolling 5 Draws)
+# ==============================
+    def create_ml_dataset(df, window=5):
+        X, y = [], []
 
-    last_draw = set(df_numbers.tail(1).values.flatten())
-    hot_numbers = sorted(freq, key=freq.get, reverse=True)[:15]
-    rebound = [n for n in hot_numbers if n not in last_draw][:12]
+        for i in range(window, len(df)):
+            past_draws = df.iloc[i-window:i].values.flatten()
+            next_draw = df.iloc[i].values
 
-    # ==============================
-    # PAIR STRENGTH
-    # ==============================
+            feature = np.zeros(MAX_NUMBER)
+            for n in past_draws:
+                feature[n-1] += 1
 
-    pair_counter = Counter()
-
-    for _, row in df_numbers.iterrows():
-        nums = sorted(row.values)
-        pairs = itertools.combinations(nums, 2)
-        pair_counter.update(pairs)
-
-    # ==============================
-    # GENERATE PRIMARY SET
-    # ==============================
-
-    scored_sets = []
-
-    for combo in itertools.combinations(rebound[:12], 6):
-        freq_score = sum(freq[n] for n in combo)
-        pair_score = sum(pair_counter.get(tuple(sorted(p)), 0)
-                         for p in itertools.combinations(combo, 2))
-        total = freq_score + pair_score
-        scored_sets.append((combo, total))
-
-    scored_sets.sort(key=lambda x: x[1], reverse=True)
-    primary_set = scored_sets[0][0]
-
-    # ==============================
-    # STRONGEST 3
-    # ==============================
-
-    trio_scores = []
-
-    for trio in itertools.combinations(primary_set, 3):
-        freq_score = sum(freq[n] for n in trio)
-        pair_score = sum(pair_counter.get(tuple(sorted(p)), 0)
-                         for p in itertools.combinations(trio, 2))
-        trio_scores.append((trio, freq_score + pair_score))
-
-    trio_scores.sort(key=lambda x: x[1], reverse=True)
-    best_three = trio_scores[0][0]
-
-    # ==============================
-    # MACHINE LEARNING MODEL
-    # ==============================
-
-    max_number = int(df_numbers.max().max())
-
-    def create_ml_dataset(df):
-        X = []
-        y = []
-
-        for i in range(len(df) - 1):
-            current_draw = df.iloc[i].values
-            next_draw = df.iloc[i + 1].values
-
-            feature_vector = np.zeros(max_number)
-            for n in current_draw:
-                feature_vector[n - 1] = 1
-
-            target_vector = np.zeros(max_number)
+            target = np.zeros(MAX_NUMBER)
             for n in next_draw:
-                target_vector[n - 1] = 1
+                target[n-1] = 1
 
-            X.append(feature_vector)
-            y.append(target_vector)
+            X.append(feature)
+            y.append(target)
 
         return np.array(X), np.array(y)
 
-    X, y = create_ml_dataset(df_numbers)
+# ==============================
+# STRUCTURAL ANALYSIS
+# ==============================
+    def analyze_structure(df):
+        odd_even = []
+        low_high = []
+        sums = []
+
+        for _, row in df.iterrows():
+            nums = row.values
+            odd = sum(n % 2 for n in nums)
+            low = sum(n <= MID for n in nums)
+
+            odd_even.append(odd)
+            low_high.append(low)
+            sums.append(sum(nums))
+
+        return {
+            "odd_even_mode": Counter(odd_even).most_common(2),
+            "low_high_mode": Counter(low_high).most_common(2),
+            "sum_mean": np.mean(sums),
+            "sum_std": np.std(sums)
+        }
+
+# ==============================
+# NORMALIZE FUNCTION
+# ==============================
+    def normalize_dict(d):
+        max_val = max(d.values())
+        return {k: v / max_val for k, v in d.items()}
+
+# ==============================
+# TRAIN MODELS
+# ==============================
+    freq = calculate_frequency(df_main)
+    delay = calculate_delay(df_main)
+
+    freq_norm = normalize_dict(freq)
+    delay_norm = normalize_dict(delay)
+
+    X, y = create_ml_dataset(df_main)
 
     if len(X) > 10:
-        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, shuffle=False)
+        X_train, X_test, y_train, y_test = train_test_split(
+            X, y, test_size=0.2, shuffle=False)
 
-        model = MultiOutputClassifier(RandomForestClassifier(n_estimators=200))
+        model = MultiOutputClassifier(
+            RandomForestClassifier(n_estimators=400, max_depth=12)
+        )
+
         model.fit(X_train, y_train)
-
         ml_probs = model.predict_proba([X[-1]])
 
-        prob_scores = []
+        ml_scores = {}
         for i in range(len(ml_probs)):
-            prob_scores.append(ml_probs[i][0][1])
+            ml_scores[i+1] = ml_probs[i][0][1]
 
-        ml_prediction = np.argsort(prob_scores)[-6:] + 1
+        ml_norm = normalize_dict(ml_scores)
     else:
-        ml_prediction = []
+        ml_norm = {i: 0 for i in range(1, MAX_NUMBER+1)}
 
-    # ==============================
-    # BACKTEST TRACKER
-    # ==============================
+# ==============================
+# FINAL NUMBER SCORING
+# ==============================
+    final_scores = {}
 
-    def backtest(df, window=50):
-        hits = []
+    for num in range(1, MAX_NUMBER+1):
+        final_scores[num] = (
+            0.4 * freq_norm.get(num, 0) +
+            0.3 * delay_norm.get(num, 0) +
+            0.3 * ml_norm.get(num, 0)
+        )
 
-        for i in range(window, len(df) - 1):
-            train_df = df.iloc[:i]
-            test_draw = set(df.iloc[i + 1].values)
+    ranked_numbers = sorted(final_scores, key=final_scores.get, reverse=True)
+    top_pool = ranked_numbers[:18]
 
-            freq_local = calculate_frequency(train_df)
-            hot_local = sorted(freq_local, key=freq_local.get, reverse=True)[:6]
+# ==============================
+# PAIR STRENGTH
+# ==============================
+    pair_counter = Counter()
+    for _, row in df_main.iterrows():
+        pair_counter.update(itertools.combinations(sorted(row.values), 2))
 
-            predicted = set(hot_local)
-            hit_count = len(predicted.intersection(test_draw))
-            hits.append(hit_count)
+# ==============================
+# STRUCTURE FILTER
+# ==============================
+    structure = analyze_structure(df_main)
+    allowed_odds = [x[0] for x in structure["odd_even_mode"]]
+    allowed_low = [x[0] for x in structure["low_high_mode"]]
 
-        return hits
+    sum_mean = structure["sum_mean"]
+    sum_std = structure["sum_std"]
 
-    if len(df_numbers) > 60:
-        hit_results = backtest(df_numbers)
-        avg_hits = np.mean(hit_results)
-    else:
-        hit_results = []
-        avg_hits = 0
+# ==============================
+# GENERATE COMBINATIONS
+# ==============================
+    scored_sets = []
 
-    # ==============================
-    # HEATMAP VISUALIZATION
-    # ==============================
+    for combo in itertools.combinations(top_pool, 6):
 
-    freq_df = pd.DataFrame.from_dict(freq, orient="index", columns=["Frequency"])
-    freq_df = freq_df.sort_index()
+        odd_count = sum(n % 2 for n in combo)
+        low_count = sum(n <= MID for n in combo)
+        total_sum = sum(combo)
 
-    fig, ax = plt.subplots()
-    heat_data = np.array(freq_df["Frequency"]).reshape(1, -1)
-    ax.imshow(heat_data)
-    ax.set_yticks([])
-    ax.set_xticks(range(len(freq_df.index)))
-    ax.set_xticklabels(freq_df.index, rotation=90)
-    st.pyplot(fig)
+        if odd_count not in allowed_odds:
+            continue
+        if low_count not in allowed_low:
+            continue
+        if not (sum_mean - sum_std <= total_sum <= sum_mean + sum_std):
+            continue
 
-    # ==============================
-    # DISPLAY RESULTS
-    # ==============================
+        pair_score = sum(pair_counter.get(tuple(sorted(p)), 0)
+                         for p in itertools.combinations(combo, 2))
 
-    st.subheader("🎯 Primary 6-Number Set")
-    st.write(sorted(primary_set))
+        combo_score = sum(final_scores[n] for n in combo) + pair_score
+        scored_sets.append((combo, combo_score))
 
-    st.subheader("🔥 Strongest 3")
-    st.write(sorted(best_three))
+    scored_sets.sort(key=lambda x: x[1], reverse=True)
 
-    st.subheader("🤖 ML Suggested 6")
-    st.write(sorted(ml_prediction))
+# ==============================
+# BONUS MODEL (Separate)
+# ==============================
+    bonus_freq = calculate_frequency(df_bonus)
+    bonus_delay = calculate_delay(df_bonus)
 
-    st.subheader("📊 Backtest Average Hits (Hot Model)")
-    st.write(round(avg_hits, 2))
+    bonus_freq_norm = normalize_dict(bonus_freq)
+    bonus_delay_norm = normalize_dict(bonus_delay)
+
+    bonus_scores = {}
+    for num in range(1, MAX_NUMBER+1):
+        bonus_scores[num] = (
+            0.6 * bonus_freq_norm.get(num, 0) +
+            0.4 * bonus_delay_norm.get(num, 0)
+        )
+
+    best_bonus = max(bonus_scores, key=bonus_scores.get)
+
+# ==============================
+# DISPLAY RESULTS
+# ==============================
+    st.subheader("🏆 Top 5 Ranked Sets")
+
+    for i in range(min(5, len(scored_sets))):
+        st.write(f"Set {i+1}: {sorted(scored_sets[i][0])}  | Bonus: {best_bonus}")
