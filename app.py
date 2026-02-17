@@ -1,82 +1,69 @@
-import streamlit as st
-import pandas as pd
-import numpy as np
+st.subheader("🧪 Walk-Forward Backtest")
 
-st.title("🎯 Bonus Ball Analytics Lab")
+hits = 0
+predictions = []
+actuals = []
 
-MAX_NUMBER = 49
+bonus_values = bonus_series.values
+N = MAX_NUMBER
 
-uploaded_file = st.file_uploader("Upload Excel File", type=["xlsx"])
+start_point = 200  # need some training history
 
-if uploaded_file:
+for i in range(start_point, len(bonus_values)):
 
-    df = pd.read_excel(uploaded_file)
+    train = bonus_values[:i]
+    actual = bonus_values[i]
 
-    # Assume bonus column is named "Bonus"
-    if "Bonus" not in df.columns:
-        st.error("No 'Bonus' column found.")
-        st.stop()
+    train_series = pd.Series(train)
 
-    bonus_series = pd.to_numeric(df["Bonus"], errors="coerce").dropna().astype(int)
+    # Frequency score
+    freq = train_series.value_counts().reindex(range(1, N+1), fill_value=0)
+    freq_score = freq / freq.max() if freq.max() > 0 else freq
 
-    st.subheader("Dataset Info")
-    st.write("Total Bonus Draws:", len(bonus_series))
-
-    # ---------- FREQUENCY SCORE ----------
-    freq = bonus_series.value_counts().reindex(range(1, MAX_NUMBER+1), fill_value=0)
-    freq_score = freq / freq.max()
-
-    # ---------- RECENCY SCORE ----------
+    # Recency / gap score
     last_occurrence = {}
-    for num in range(1, MAX_NUMBER+1):
-        occurrences = np.where(bonus_series.values == num)[0]
+    for num in range(1, N+1):
+        occurrences = np.where(train == num)[0]
         if len(occurrences) > 0:
-            last_occurrence[num] = len(bonus_series) - occurrences[-1]
+            last_occurrence[num] = len(train) - occurrences[-1]
         else:
-            last_occurrence[num] = len(bonus_series)
+            last_occurrence[num] = len(train)
 
     recency_score = pd.Series(last_occurrence)
     recency_score = recency_score / recency_score.max()
 
-    # ---------- GAP SCORE (Overdue bias) ----------
-    gap_score = recency_score.copy()
-
-    # ---------- ROLLING WINDOW SCORE ----------
-    window = 200 if len(bonus_series) > 200 else len(bonus_series)
-    rolling_freq = bonus_series[-window:].value_counts().reindex(range(1, MAX_NUMBER+1), fill_value=0)
+    # Rolling window
+    window = 100 if len(train) > 100 else len(train)
+    rolling_freq = train_series[-window:].value_counts().reindex(range(1, N+1), fill_value=0)
     rolling_score = rolling_freq / rolling_freq.max() if rolling_freq.max() > 0 else rolling_freq
 
-    # ---------- FINAL WEIGHTED SCORE ----------
+    # Final score
     final_score = (
         0.35 * freq_score +
-        0.30 * rolling_score +
-        0.20 * gap_score +
-        0.15 * recency_score
+        0.35 * rolling_score +
+        0.30 * recency_score
     )
 
-    ranked = final_score.sort_values(ascending=False)
+    top5 = final_score.sort_values(ascending=False).head(5).index.tolist()
 
-    st.subheader("🔥 Top 5 Predicted Bonus Candidates")
-    st.write(ranked.head(5))
+    predictions.append(top5)
+    actuals.append(actual)
 
-    # ---------- Backtest ----------
-    st.subheader("📊 Backtest Last 100 Draws")
+    if actual in top5:
+        hits += 1
 
-    test_window = 100 if len(bonus_series) > 100 else len(bonus_series)-1
-    hits = 0
+total_tests = len(actuals)
+hit_rate = hits / total_tests
 
-    for i in range(len(bonus_series) - test_window, len(bonus_series)-1):
-        train = bonus_series[:i]
-        test_value = bonus_series[i]
+st.write("Total Tests:", total_tests)
+st.write("Total Hits:", hits)
+st.write("Model Hit Rate:", round(hit_rate * 100, 2), "%")
 
-        freq_bt = train.value_counts().reindex(range(1, MAX_NUMBER+1), fill_value=0)
-        freq_bt = freq_bt / freq_bt.max() if freq_bt.max() > 0 else freq_bt
+# Random baseline
+random_baseline = 5 / MAX_NUMBER
+st.write("Random Baseline:", round(random_baseline * 100, 2), "%")
 
-        top5 = freq_bt.sort_values(ascending=False).head(5).index.tolist()
-
-        if test_value in top5:
-            hits += 1
-
-    hit_rate = hits / test_window if test_window > 0 else 0
-
-    st.write("Top 5 Bonus Hit Rate:", round(hit_rate * 100, 2), "%")
+if hit_rate > random_baseline:
+    st.success("Model outperforms random baseline.")
+else:
+    st.warning("Model does NOT outperform random baseline.")
