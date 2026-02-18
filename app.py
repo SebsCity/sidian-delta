@@ -8,7 +8,6 @@ from scipy.stats import zscore
 # ==========================================
 # CONFIG
 # ==========================================
-
 st.set_page_config(page_title="Sidian Bonus Lab PRO", layout="wide", page_icon="🎯")
 st.title("🎯 Sidian Bonus Lab PRO")
 st.caption("Enterprise Hybrid Probability Engine")
@@ -19,7 +18,6 @@ DB_PATH = "database/draws.db"
 # ==========================================
 # DATABASE SETUP
 # ==========================================
-
 def init_db():
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
@@ -43,14 +41,16 @@ def save_to_db(df):
 
 def load_from_db():
     conn = sqlite3.connect(DB_PATH)
-    df = pd.read_sql("SELECT * FROM draws", conn)
+    try:
+        df = pd.read_sql("SELECT * FROM draws", conn)
+    except Exception:
+        df = pd.DataFrame(columns=["id","draw_date","numbers","bonus"])
     conn.close()
     return df
 
 # ==========================================
 # AUTO-DETECT BONUS COLUMN
 # ==========================================
-
 def detect_bonus_column(df):
     possible_names = ["bonus", "bonus_ball", "bonusball", "b", "extra"]
     for col in df.columns:
@@ -65,7 +65,6 @@ def detect_bonus_column(df):
 # ==========================================
 # TRANSITION MATRIX
 # ==========================================
-
 def build_transition_matrix(series):
     matrix = np.zeros((MAX_NUMBER, MAX_NUMBER))
     for i in range(len(series)-1):
@@ -87,7 +86,6 @@ def monte_carlo(matrix, last, sims=5000):
 # ==========================================
 # ADVANCED SCORING
 # ==========================================
-
 def advanced_scores(series):
     freq = series.value_counts().reindex(range(1, MAX_NUMBER+1), fill_value=0)
     freq_prob = (freq+1)/(len(series)+MAX_NUMBER)
@@ -111,10 +109,8 @@ def advanced_scores(series):
 # ==========================================
 # SIDEBAR INPUT
 # ==========================================
-
 st.sidebar.header("📂 Data Input")
 mode = st.sidebar.radio("Select Input Method", ["Upload File","Paste Data","Load From Database"])
-
 bonus_series = None
 
 # ---- Upload ----
@@ -128,7 +124,6 @@ if mode == "Upload File":
                 df = pd.read_excel(file, engine="openpyxl")
 
             bonus_col = detect_bonus_column(df)
-
             if bonus_col is None:
                 st.error("Could not auto-detect Bonus column.")
                 st.stop()
@@ -146,7 +141,6 @@ if mode == "Upload File":
             })
 
             save_to_db(db_df)
-
             st.success(f"Loaded {len(bonus_series)} draws & saved to DB.")
 
         except Exception as e:
@@ -169,20 +163,19 @@ elif mode == "Load From Database":
         st.success(f"Loaded {len(bonus_series)} draws from DB.")
 
 # ==========================================
-# MANUAL DRAW TRIGGER (NEW)
+# MANUAL DRAW TRIGGER FLEXIBLE INPUT
 # ==========================================
-
 st.sidebar.header("🎯 Manual Draw Trigger")
 manual_nums_input = st.sidebar.text_input(
-    "Enter 6 main numbers separated by commas",
+    "Enter main numbers separated by commas (1-6 or more)",
     value=""
 )
 
 if manual_nums_input:
     try:
         manual_list = [int(x.strip()) for x in manual_nums_input.split(",") if x.strip().isdigit()]
-        if len(manual_list) != 6:
-            st.sidebar.error("Please enter exactly 6 numbers.")
+        if len(manual_list) < 1:
+            st.sidebar.error("Enter at least one number.")
             manual_list = None
         else:
             manual_list = pd.Series(manual_list)
@@ -195,7 +188,6 @@ else:
 # ==========================================
 # MAIN ENGINE
 # ==========================================
-
 if bonus_series is not None and len(bonus_series) > 100:
 
     tab1, tab2, tab3 = st.tabs(["🔮 Prediction","📊 Trend","🧪 Backtest"])
@@ -216,35 +208,50 @@ if bonus_series is not None and len(bonus_series) > 100:
                 st.metric(f"Rank {i+1}", f"#{num}", f"{val*100:.2f}%")
                 st.caption(f"Gap: {int(gaps[num])}")
 
-        # -------- MANUAL TRIGGER --------
+        # -------- FLEXIBLE MANUAL TRIGGER --------
         if manual_list is not None:
-            st.subheader("Manual Draw Trigger Bonus Prediction")
+            st.subheader("Manual Draw Trigger Bonus Prediction (Flexible)")
+
             df_history = load_from_db()
-            df_history["numbers_list"] = df_history["numbers"].str.split(",")
-
-            match_bonus = []
-            for idx, row in df_history.iterrows():
-                draw_nums = set(int(x) for x in row["numbers_list"])
-                match_count = len(draw_nums.intersection(set(manual_list)))
-                if match_count >= 3:  # minimum 3 matching numbers to trigger
-                    match_bonus.append(row["bonus"])
-
-            if match_bonus:
-                match_series = pd.Series(match_bonus)
-                scores, gaps = advanced_scores(match_series)
-                matrix = build_transition_matrix(match_series)
-                last = match_series.iloc[-1]
-                markov_probs = monte_carlo(matrix,last)
-                hybrid = 0.6*scores + 0.4*markov_probs
-                top5 = hybrid.nlargest(5)
-
-                cols = st.columns(5)
-                for i,(num,val) in enumerate(top5.items()):
-                    with cols[i]:
-                        st.metric(f"Rank {i+1}", f"#{num}", f"{val*100:.2f}%")
-                        st.caption(f"Gap: {int(gaps[num])}")
+            if df_history.empty:
+                st.info("Database is empty. Load historical draws first.")
             else:
-                st.info("No historical draws match your input sufficiently to generate predictions.")
+                df_history["numbers_list"] = df_history["numbers"].str.split(",")
+
+                bonus_weighted = {}
+                for idx, row in df_history.iterrows():
+                    draw_nums = set(int(x) for x in row["numbers_list"])
+                    match_count = len(draw_nums.intersection(set(manual_list)))
+                    if match_count > 0:
+                        weight = match_count / len(manual_list)
+                        bonus_num = row["bonus"]
+                        bonus_weighted[bonus_num] = bonus_weighted.get(bonus_num,0) + weight
+
+                if bonus_weighted:
+                    weighted_series = pd.Series(bonus_weighted)
+                    weighted_probs = weighted_series / weighted_series.sum()
+
+                    match_bonus = pd.Series(list(bonus_weighted.keys()))
+                    scores, gaps = advanced_scores(match_bonus)
+                    matrix = build_transition_matrix(match_bonus)
+                    last = match_bonus.iloc[-1]
+                    markov_probs = monte_carlo(matrix,last)
+                    hybrid = 0.6*scores + 0.4*markov_probs
+
+                    final_scores = 0.7*weighted_probs.reindex(range(1,MAX_NUMBER+1), fill_value=0) + 0.3*hybrid
+                    top5 = final_scores.nlargest(5)
+
+                    st.info(f"Manual input: {', '.join(str(x) for x in manual_list)}")
+                    st.caption(f"Predicted Bonus Balls based on weighted historical matches")
+
+                    cols = st.columns(5)
+                    for i,(num,val) in enumerate(top5.items()):
+                        with cols[i]:
+                            st.metric(f"Rank {i+1}", f"#{num}", f"{val*100:.2f}%")
+                            if num in gaps:
+                                st.caption(f"Gap: {int(gaps[num])}")
+                else:
+                    st.info("No historical draws match your input at all.")
 
     # -------- TREND --------
     with tab2:
