@@ -1,1 +1,2 @@
-# sidian-delta
+[server]
+maxUploadSize = 200
