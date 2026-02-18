@@ -3,6 +3,7 @@ import pandas as pd
 import numpy as np
 import plotly.express as px
 import sqlite3
+import os
 from scipy.stats import zscore
 
 # ==========================================
@@ -19,6 +20,8 @@ DB_PATH = "database/draws.db"
 # DATABASE SETUP
 # ==========================================
 def init_db():
+    # ensure folder exists
+    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute("""
