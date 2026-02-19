@@ -10,12 +10,8 @@ import os
 # ==========================================
 st.set_page_config(page_title="Sidian Bonus Lab PRO", layout="wide", page_icon="🚀")
 
-# Initialize Session State to keep data across refreshes
-if 'data_loaded' not in st.session_state:
-    st.session_state.data_loaded = False
-
-st.title("🎯 Sidian Bonus Lab PRO")
-st.caption("Synchronized Hybrid Engine: History + Manual Trigger")
+st.title("🎯 Sidian Bonus Lab: Ripple Edition")
+st.caption("Predicting Bonus Balls + The 'Splits' (Next Main Numbers) Due to Follow")
 
 MAX_NUMBER = 49
 DB_PATH = "database/draws.db"
@@ -40,13 +36,29 @@ def get_history():
     return df
 
 # ==========================================
-# CALCULATION ENGINE
+# RIPPLE ENGINE (Predicts Main Numbers following a Bonus)
+# ==========================================
+def get_historical_splits(history_df, target_bonus):
+    """Finds the main numbers that follow a specific bonus in the next draw."""
+    splits = []
+    # Loop through history to find where the bonus matches
+    for i in range(len(history_df) - 1):
+        if int(history_df.iloc[i]['bonus']) == target_bonus:
+            # Get the main numbers from the NEXT draw (the 'split')
+            next_draw_nums = str(history_df.iloc[i+1]['numbers']).split(',')
+            splits.extend([int(float(x)) for x in next_draw_nums if x != 'nan'])
+    
+    if splits:
+        return pd.Series(splits).value_counts().head(3).index.tolist()
+    return []
+
+# ==========================================
+# PREDICTION ENGINE
 # ==========================================
 def run_prediction_engine(history_df, manual_input_str):
-    # 1. Clean Bonus Data for Stats
     bonus_series = pd.to_numeric(history_df['bonus'], errors='coerce').dropna().astype(int)
     
-    # 2. Base Stats (Frequency + Decay)
+    # 1. Base Stats
     freq = bonus_series.value_counts().reindex(range(1, MAX_NUMBER+1), fill_value=0)
     freq_s = (freq - freq.min()) / (freq.max() - freq.min()) if freq.max() > freq.min() else freq
     
@@ -56,7 +68,7 @@ def run_prediction_engine(history_df, manual_input_str):
     gaps = pd.Series([len(bonus_series) - last_seen[i] for i in range(1, MAX_NUMBER+1)], index=range(1, MAX_NUMBER+1))
     gap_s = (gaps - gaps.min()) / (gaps.max() - gaps.min()) if gaps.max() > gaps.min() else gaps
     
-    # 3. Correlation (Buddy System)
+    # 2. Buddy Correlation
     current_draw = [int(x) for x in manual_input_str.split() if x.isdigit()]
     buddy_weights = pd.Series(0.0, index=range(1, MAX_NUMBER+1))
     
@@ -68,63 +80,63 @@ def run_prediction_engine(history_df, manual_input_str):
     
     buddy_s = (buddy_weights / buddy_weights.max()) if buddy_weights.max() > 0 else buddy_weights
     
-    # 4. Final Weighted Rank
-    final_score = (0.70 * buddy_s) + (0.20 * gap_s) + (0.10 * freq_s)
+    final_score = (0.70 * buddy_s) + (0.30 * gap_s)
     return final_score.nlargest(3), gaps
 
 # ==========================================
-# MAIN UI
+# UI LAYOUT
 # ==========================================
-col_data, col_pred = st.columns([1, 2])
+history = get_history()
 
-with col_data:
-    st.subheader("📁 1. Load Data")
-    file = st.file_uploader("Upload History (Excel/CSV)", type=["xlsx", "csv"])
-    
+with st.sidebar:
+    st.header("⚙️ Data Management")
+    file = st.file_uploader("Refresh History", type=["xlsx", "csv"])
     if file:
         df_new = pd.read_excel(file) if file.name.endswith('.xlsx') else pd.read_csv(file)
-        if st.button("Commit to Sidian Database"):
+        if st.button("Commit to Database"):
             conn = sqlite3.connect(DB_PATH)
-            # Make sure your Excel has 'Main_1' to 'Main_6' and 'Bonus'
             df_new['numbers'] = df_new[['Main_1','Main_2','Main_3','Main_4','Main_5','Main_6']].astype(str).agg(','.join, axis=1)
             df_new[['numbers', 'Bonus']].to_sql("draws", conn, if_exists="replace", index=False)
             conn.close()
-            st.session_state.data_loaded = True
-            st.success("Database Ready!")
+            st.success("Synced!")
+            st.rerun()
 
-with col_pred:
-    st.subheader("🔮 2. Prediction Hub")
-    history = get_history()
+st.subheader("🔮 Step 1: Input Current Draw")
+with st.form("main_form"):
+    manual_input = st.text_input("Paste 6 Main Numbers (Space separated)", placeholder="e.g. 1 14 23 35 40 44")
+    submitted = st.form_submit_button("Generate Predicted Bonuses & Follow-up Splits")
+
+if submitted and not history.empty:
+    top3, gaps = run_prediction_engine(history, manual_input)
     
-    if history.empty:
-        st.info("Awaiting data upload...")
-    else:
-        st.write(f"Analyzing {len(history)} historical draws.")
-        
-        with st.form("prediction_form"):
-            manual_input = st.text_input("Paste Current Main Draw (Spaces only):", placeholder="e.g. 5 12 23 34 41 47")
-            run_btn = st.form_submit_button("Generate Top 3 Bonuses")
+    st.divider()
+    st.subheader("🎯 Result: Top 3 Bonus Possibilities & Predicted Splits")
+    
+    cols = st.columns(3)
+    for i, (bonus_num, weight) in enumerate(top3.items()):
+        with cols[i]:
+            # Bonus Prediction Card
+            st.metric(f"Rank {i+1} Bonus", f"#{bonus_num}")
+            st.caption(f"Confidence: {int(weight*100)}% | Gap: {gaps[bonus_num]} draws")
             
-            if run_btn:
-                if manual_input:
-                    top3, current_gaps = run_prediction_engine(history, manual_input)
-                    
-                    st.divider()
-                    st.write("### 🎯 Predicted Bonus Sequence")
-                    res_cols = st.columns(3)
-                    for i, (num, val) in enumerate(top3.items()):
-                        with res_cols[i]:
-                            st.metric(f"Rank {i+1}", f"#{num}")
-                            st.progress(min(val, 1.0))
-                            st.caption(f"Gap: {current_gaps[num]} draws")
-                else:
-                    st.error("Please enter the main draw numbers.")
+            # --- THE SPLITS LOGIC ---
+            st.markdown("---")
+            st.markdown("**Predicted Next-Draw Splits:**")
+            predicted_splits = get_historical_splits(history, bonus_num)
+            
+            if predicted_splits:
+                # Display splits as little tags
+                split_html = "".join([f"<span style='background-color:#007BFF; color:white; padding:5px 10px; border-radius:15px; margin-right:5px;'>{s}</span>" for s in predicted_splits])
+                st.markdown(split_html, unsafe_allow_html=True)
+                st.caption("These main numbers often follow this Bonus.")
+            else:
+                st.caption("No historical follow-up data yet.")
 
-# ==========================================
-# VISUALS
-# ==========================================
+elif history.empty:
+    st.info("Please upload your data sheet in the sidebar to begin.")
+
+# Visualizations...
 if not history.empty:
     st.divider()
-    _, gaps = run_prediction_engine(history, "0") # Dummy input just for gaps
-    fig = px.bar(x=gaps.index, y=gaps.values, color=gaps.values, color_continuous_scale='Reds', title="Overdue Pressure Index")
+    fig = px.bar(x=gaps.index, y=gaps.values, color=gaps.values, color_continuous_scale='Reds', title="Bonus Ball Overdue Pressure (Decay)")
     st.plotly_chart(fig, use_container_width=True)
