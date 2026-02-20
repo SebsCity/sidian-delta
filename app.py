@@ -6,85 +6,119 @@ import sqlite3
 import os
 
 # ==========================================
-# CONFIG
+# CONFIG & SESSION STATE
 # ==========================================
 st.set_page_config(page_title="Sidian Decision Matrix", layout="wide", page_icon="🎯")
-st.title("🎯 Sidian Bonus Decision Matrix")
-st.caption("Hybrid Intelligence: Theory vs. Decay vs. Ripple Analysis")
+
+# Custom CSS for the Sidian "Gold" Highlighting
+st.markdown("""
+    <style>
+    .gold-box {
+        background-color: #FFD700;
+        color: #000;
+        padding: 10px;
+        border-radius: 10px;
+        border: 2px solid #DAA520;
+        text-align: center;
+        font-weight: bold;
+        margin-bottom: 5px;
+    }
+    .standard-box {
+        background-color: #f0f2f6;
+        padding: 10px;
+        border-radius: 10px;
+        text-align: center;
+        margin-bottom: 5px;
+    }
+    </style>
+    """, unsafe_allow_html=True)
 
 MAX_NUMBER = 49 # Standard UK49s / SA Lotto
 DB_PATH = "database/draws.db"
 
 # ==========================================
-# CORE ENGINES
+# DATABASE & STORAGE
 # ==========================================
-def get_analysis_data(history_df, main_input):
+def init_db():
+    if not os.path.exists("database"):
+        os.makedirs("database")
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute("CREATE TABLE IF NOT EXISTS draws (id INTEGER PRIMARY KEY, numbers TEXT, bonus INTEGER)")
+    conn.close()
+
+init_db()
+
+def get_history():
+    conn = sqlite3.connect(DB_PATH)
+    df = pd.read_sql("SELECT * FROM draws ORDER BY id DESC", conn)
+    conn.close()
+    return df
+
+# ==========================================
+# ANALYTICS ENGINES
+# ==========================================
+def calculate_matrix(history_df, main_input):
+    # Convert input to sorted list
     m_set = sorted([int(x) for x in main_input.split() if x.isdigit()])
+    if len(m_set) < 1: return None
+    
     bonus_series = history_df['bonus'].astype(int)
     
-    # 1. HARMONIC BALANCE (Mean Sync)
-    # The "Gravity" of the set.
-    avg = np.mean(m_set)
-    harmonic_candidates = [int(round(avg - 1)), int(round(avg)), int(round(avg + 1))]
-    harmonic_candidates = [n for n in harmonic_candidates if 1 <= n <= MAX_NUMBER]
+    # 1. HYBRID ENGINE (Neighbor + Gap Fill)
+    hybrid_scores = pd.Series(0.0, index=range(1, MAX_NUMBER + 1))
+    for x in m_set:
+        for offset in [-1, 0, 1]:
+            if 1 <= x+offset <= MAX_NUMBER: hybrid_scores[x+offset] += 1.5
+    
+    diffs = [m_set[i+1] - m_set[i] for i in range(len(m_set)-1)]
+    if diffs:
+        max_idx = np.argmax(diffs)
+        for n in range(m_set[max_idx]+1, m_set[max_idx+1]): hybrid_scores[n] += 1.2
+    hybrid_top = hybrid_scores.nlargest(5).index.tolist()
 
-    # 2. OVERDUE FACTOR (Decay)
-    # The "Elasticity" - which numbers are due to snap?
+    # 2. HARMONIC BALANCE (Mathematical Center)
+    avg = np.mean(m_set)
+    harmonic = [int(round(avg - 1)), int(round(avg)), int(round(avg + 1))]
+    harmonic = [n for n in harmonic if 1 <= n <= MAX_NUMBER]
+
+    # 3. OVERDUE FACTOR (Decay Analysis)
     last_seen = {i: -1 for i in range(1, MAX_NUMBER+1)}
     for idx, val in enumerate(bonus_series[::-1]):
-        if 1 <= val <= MAX_NUMBER and last_seen[val] == -1:
-            last_seen[val] = len(bonus_series) - idx
+        if 1 <= val <= MAX_NUMBER: last_seen[val] = len(bonus_series) - idx
     gaps = pd.Series([len(bonus_series) - last_seen[i] for i in range(1, MAX_NUMBER+1)], index=range(1, MAX_NUMBER+1))
-    top_overdue = gaps.nlargest(5).index.tolist()
+    overdue = gaps.nlargest(5).index.tolist()
 
-    # 3. RIPPLE SPLITS (Lead-Lag)
-    # What usually follows the LAST drawn bonus ball?
-    last_bonus = int(bonus_series.iloc[0]) # Assuming newest first
+    # 4. RIPPLE SPLITS (Historical Aftershocks)
+    last_bonus = int(bonus_series.iloc[0])
     splits = []
     for i in range(len(history_df) - 1):
         if int(history_df.iloc[i+1]['bonus']) == last_bonus:
             nums = [int(float(x)) for x in str(history_df.iloc[i]['numbers']).split(',') if x != 'nan']
             splits.extend(nums)
-    
-    top_splits = pd.Series(splits).value_counts().head(5).index.tolist() if splits else []
-
-    # 4. NEIGHBOR/GAP SYNTHESIS (The Hybrid Top 3)
-    # This is the logic that caught #22 earlier.
-    scores = pd.Series(0.0, index=range(1, MAX_NUMBER + 1))
-    for x in m_set:
-        for offset in [-1, 0, 1]:
-            if 1 <= x+offset <= MAX_NUMBER: scores[x+offset] += 1.5
-    
-    diffs = [m_set[i+1] - m_set[i] for i in range(len(m_set)-1)]
-    if diffs:
-        max_idx = np.argmax(diffs)
-        for n in range(m_set[max_idx]+1, m_set[max_idx+1]): scores[n] += 1.2
-        
-    hybrid_top3 = scores.nlargest(3).index.tolist()
+    ripple = pd.Series(splits).value_counts().head(5).index.tolist() if splits else []
 
     return {
-        "hybrid": hybrid_top3,
-        "harmonic": harmonic_candidates,
-        "overdue": top_overdue,
-        "splits": top_splits,
-        "gaps": gaps
+        "Hybrid": hybrid_top,
+        "Harmonic": harmonic,
+        "Overdue": overdue,
+        "Ripple": ripple,
+        "Gaps": gaps
     }
 
 # ==========================================
-# UI & DATABASE
+# MAIN UI
 # ==========================================
-if not os.path.exists(DB_PATH):
-    os.makedirs("database", exist_ok=True)
-    conn = sqlite3.connect(DB_PATH)
-    conn.execute("CREATE TABLE IF NOT EXISTS draws (id INTEGER PRIMARY KEY, numbers TEXT, bonus INTEGER)")
-    conn.close()
+st.title("🎯 Sidian Decision Matrix PRO")
+st.caption("Strategic Decision Engine for Professional Analytics")
+
+history = get_history()
 
 with st.sidebar:
-    st.header("📂 Data Master")
-    uploaded = st.file_uploader("Upload 'A Lister' Sheet", type=["xlsx", "csv"])
-    if uploaded:
-        df_new = pd.read_excel(uploaded) if uploaded.name.endswith('.xlsx') else pd.read_csv(uploaded)
-        if st.button("Sync & Overwrite"):
+    st.header("⚙️ Sidian Data Sync")
+    file = st.file_uploader("Upload 'A Lister' Sheet", type=["xlsx", "csv"])
+    if file:
+        df_new = pd.read_excel(file) if file.name.endswith('.xlsx') else pd.read_csv(file)
+        if st.button("Commit to Database"):
             m_cols = [c for c in df_new.columns if 'main' in c.lower() or 'num' in c.lower()][:6]
             b_col = [c for c in df_new.columns if 'bonus' in c.lower()][0]
             db_ready = pd.DataFrame()
@@ -93,55 +127,50 @@ with st.sidebar:
             conn = sqlite3.connect(DB_PATH)
             db_ready.to_sql("draws", conn, if_exists="replace", index=True, index_label="id")
             conn.close()
-            st.success("History Synced!")
+            st.success("History Synced Successfully!")
             st.rerun()
 
-# MAIN INTERFACE
-conn = sqlite3.connect(DB_PATH)
-history = pd.read_sql("SELECT * FROM draws ORDER BY id DESC", conn)
-conn.close()
-
+# --- PREDICTION INTERFACE ---
 if history.empty:
-    st.info("Please upload your data sheet in the sidebar.")
+    st.info("👋 Welcome! Please upload your data sheet in the sidebar to begin.")
 else:
-    st.subheader("🔮 Step 1: Input Current Draw (The 6 Main Numbers)")
-    user_input = st.text_input("Spaces Only:", placeholder="e.g. 2 5 9 13 21 28")
+    st.subheader("🔮 Input Recent Draw (The Trigger)")
+    user_input = st.text_input("Enter 6 Main Numbers (Spaces only):", placeholder="e.g. 2 5 9 13 21 28")
 
     if user_input:
-        analysis = get_analysis_data(history, user_input)
+        results = calculate_matrix(history, user_input)
         
-        st.divider()
-        st.header("📋 The Sidian Decision Matrix")
-        st.write("Review the categories below. Look for **overlapping** numbers to identify the strongest play.")
+        if results:
+            st.divider()
+            st.header("📋 The Decision Matrix")
+            st.write("Numbers appearing in **GOLD** are overlapping across multiple theories.")
+            
+            # Identify Overlaps
+            all_nums = results["Hybrid"] + results["Harmonic"] + results["Overdue"] + results["Ripple"]
+            counts = pd.Series(all_nums).value_counts()
+            gold_list = counts[counts > 1].index.tolist()
 
-        c1, c2, c3, c4 = st.columns(4)
+            cols = st.columns(4)
+            headers = ["🚀 Hybrid Engine", "⚖️ Harmonic Balance", "⏳ Overdue Factor", "🌊 Ripple Splits"]
+            keys = ["Hybrid", "Harmonic", "Overdue", "Ripple"]
 
-        with c1:
-            st.info("🚀 **Hybrid Top 3**")
-            st.write("Best Neighbor/Gap match.")
-            for n in analysis['hybrid']:
-                st.subheader(f"#{n}")
+            for i, col in enumerate(cols):
+                with col:
+                    st.markdown(f"### {headers[i]}")
+                    for n in results[keys[i]]:
+                        if n in gold_list:
+                            st.markdown(f'<div class="gold-box">#{n} (GOLD)</div>', unsafe_allow_html=True)
+                        else:
+                            st.markdown(f'<div class="standard-box">#{n}</div>', unsafe_allow_html=True)
 
-        with c2:
-            st.success("⚖️ **Harmonic Balance**")
-            st.write("Balance points of the set.")
-            for n in analysis['harmonic']:
-                st.subheader(f"#{n}")
+            # --- DECAY VISUAL ---
+            st.divider()
+            st.subheader("📊 Overdue Heatmap (Pressure Index)")
+            gaps = results["Gaps"]
+            fig = px.bar(x=gaps.index, y=gaps.values, color=gaps.values, color_continuous_scale='Reds',
+                         labels={'x':'Ball Number', 'y':'Draws Since Seen'})
+            st.plotly_chart(fig, use_container_width=True)
 
-        with c3:
-            st.warning("⏳ **Overdue Factor**")
-            st.write("Highest 'Decay' pressure.")
-            for n in analysis['overdue'][:3]: # Top 3 overdue
-                st.subheader(f"#{n}")
-
-        with c4:
-            st.error("🌊 **Ripple Splits**")
-            st.write("Follows the last Bonus.")
-            for n in analysis['splits'][:3]:
-                st.subheader(f"#{n}")
-
-        st.divider()
-        st.subheader("📊 Overdue Heatmap (Decay Status)")
-        gaps = analysis['gaps']
-        fig = px.bar(x=gaps.index, y=gaps.values, color=gaps.values, color_continuous_scale='Reds', labels={'x':'Ball', 'y':'Draws Since Seen'})
-        st.plotly_chart(fig, use_container_width=True)
+            # --- FORENSIC HISTORY ---
+            with st.expander("View Forensic Archive"):
+                st.dataframe(history.head(10), use_container_width=True)
