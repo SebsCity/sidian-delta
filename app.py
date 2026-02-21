@@ -1,20 +1,19 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import plotly.express as px
 import sqlite3
 import os
 
 # ==========================================
 # CONFIG
 # ==========================================
-st.set_page_config(page_title="Sidian Decision Matrix V3", layout="centered", page_icon="🎯")
+st.set_page_config(page_title="Sidian V4 Self-Learning Engine", layout="centered", page_icon="🎯")
 
 MAX_NUMBER = 49
 DB_PATH = "database/draws.db"
 
-st.title("🎯 Sidian Decision Matrix V3")
-st.caption("Adaptive Multi-Engine Confluence Intelligence")
+st.title("🎯 Sidian Decision Matrix V4")
+st.caption("Self-Learning Confluence Optimization Engine")
 
 # ==========================================
 # DATABASE
@@ -41,185 +40,163 @@ def get_history():
     return df
 
 # ==========================================
-# SIDEBAR CONTROLS (ADAPTIVE WEIGHTS)
+# SAFE NUMBER PARSER (NO MORE CRASHES)
 # ==========================================
-with st.sidebar:
-    st.header("⚙️ Adaptive Controls")
-
-    w_hybrid = st.slider("Hybrid Weight", 0.0, 1.0, 0.35)
-    w_harmonic = st.slider("Harmonic Weight", 0.0, 1.0, 0.20)
-    w_overdue = st.slider("Overdue Weight", 0.0, 1.0, 0.30)
-    w_ripple = st.slider("Ripple Weight", 0.0, 1.0, 0.15)
-
-    rolling_window = st.slider("Rolling Window (Recent Draws)", 20, 300, 100)
-
-    normalize_factor = w_hybrid + w_harmonic + w_overdue + w_ripple
-    if normalize_factor == 0:
-        normalize_factor = 1
-
-    # Data Upload
-    file = st.file_uploader("Upload Draw History", type=["xlsx", "csv"])
-
-    if file:
-        df_new = pd.read_excel(file) if file.name.endswith('.xlsx') else pd.read_csv(file)
-        if st.button("Commit to Database"):
-            m_cols = [c for c in df_new.columns if 'main' in c.lower() or 'num' in c.lower()][:6]
-            b_col = [c for c in df_new.columns if 'bonus' in c.lower()][0]
-
-            db_ready = pd.DataFrame()
-            db_ready['numbers'] = df_new[m_cols].astype(str).agg(','.join, axis=1)
-            db_ready['bonus'] = df_new[b_col].astype(int)
-
-            conn = sqlite3.connect(DB_PATH)
-            db_ready.to_sql("draws", conn, if_exists="replace", index=True, index_label="id")
-            conn.close()
-            st.success("Database Updated")
-            st.rerun()
+def parse_numbers(cell):
+    nums = []
+    raw = str(cell).split(',')
+    for x in raw:
+        x = x.strip()
+        if x.isdigit():
+            val = int(x)
+            if 1 <= val <= MAX_NUMBER:
+                nums.append(val)
+    return nums
 
 # ==========================================
-# V3 ADAPTIVE ENGINE
+# ENGINE CORE
 # ==========================================
-def calculate_v3(history_df, main_input):
-
-    m_set = sorted([int(x) for x in main_input.split() if x.isdigit()])
-    if len(m_set) == 0:
-        return None
-
-    history_df = history_df.head(rolling_window)
-    bonus_series = history_df['bonus'].astype(int)
+def generate_scores(history_df, trigger_numbers, weights):
 
     base_index = range(1, MAX_NUMBER + 1)
     scores = pd.Series(0.0, index=base_index)
 
-    # ------------------------------------------
-    # 1️⃣ HYBRID ENGINE
-    # ------------------------------------------
-    hybrid = pd.Series(0.0, index=base_index)
+    m_set = trigger_numbers
+    bonus_series = history_df['bonus'].astype(int)
 
+    # 1️⃣ Hybrid
+    hybrid = pd.Series(0.0, index=base_index)
     for x in m_set:
         for offset in [-1, 0, 1]:
             if 1 <= x + offset <= MAX_NUMBER:
-                hybrid[x + offset] += 1.0
+                hybrid[x + offset] += 1
+    if hybrid.max() != 0:
+        hybrid /= hybrid.max()
 
-    hybrid = hybrid / hybrid.max() if hybrid.max() != 0 else hybrid
-
-    # ------------------------------------------
-    # 2️⃣ HARMONIC ENGINE
-    # ------------------------------------------
+    # 2️⃣ Harmonic
     harmonic = pd.Series(0.0, index=base_index)
     avg = np.mean(m_set)
-
     for n in base_index:
         harmonic[n] = max(0, 1 - abs(n - avg) / MAX_NUMBER)
+    harmonic /= harmonic.max()
 
-    harmonic = harmonic / harmonic.max()
-
-    # ------------------------------------------
-    # 3️⃣ ADAPTIVE OVERDUE ENGINE
-    # ------------------------------------------
+    # 3️⃣ Overdue
     last_seen = {i: -1 for i in base_index}
-
     for idx, val in enumerate(bonus_series[::-1]):
         if 1 <= val <= MAX_NUMBER:
             last_seen[val] = len(bonus_series) - idx
+    gaps = pd.Series([len(bonus_series) - last_seen[i] for i in base_index], index=base_index)
+    overdue = np.log1p(gaps)
+    if overdue.max() != 0:
+        overdue /= overdue.max()
 
-    gaps = pd.Series(
-        [len(bonus_series) - last_seen[i] for i in base_index],
-        index=base_index
-    )
-
-    decay = np.log1p(gaps)
-    overdue = decay / decay.max() if decay.max() != 0 else decay
-
-    # ------------------------------------------
-    # 4️⃣ RIPPLE MEMORY ENGINE
-    # ------------------------------------------
+    # 4️⃣ Ripple
     ripple = pd.Series(0.0, index=base_index)
-
     if not bonus_series.empty:
         last_bonus = int(bonus_series.iloc[0])
         splits = []
-
         for i in range(len(history_df) - 1):
             if int(history_df.iloc[i+1]['bonus']) == last_bonus:
-                nums = [
-                    int(float(x))
-                    for x in str(history_df.iloc[i]['numbers']).split(',')
-                    if x != 'nan'
-                ]
-                splits.extend(nums)
-
+                splits.extend(parse_numbers(history_df.iloc[i]['numbers']))
         if splits:
-            ripple_counts = pd.Series(splits).value_counts()
-            ripple[ripple_counts.index] = ripple_counts.values
+            counts = pd.Series(splits).value_counts()
+            ripple[counts.index] = counts.values
+            ripple /= ripple.max()
 
-    ripple = ripple / ripple.max() if ripple.max() != 0 else ripple
+    # Weighted sum
+    scores = (
+        hybrid * weights[0] +
+        harmonic * weights[1] +
+        overdue * weights[2] +
+        ripple * weights[3]
+    )
 
-    # ------------------------------------------
-    # 🧠 VOLATILITY INDEX (New)
-    # ------------------------------------------
-    volatility = bonus_series.value_counts().std()
-    st.metric("Market Volatility Index", round(volatility, 3))
-
-    # ------------------------------------------
-    # 🏆 FINAL WEIGHTED SCORE
-    # ------------------------------------------
-    final_scores = (
-        (hybrid * w_hybrid) +
-        (harmonic * w_harmonic) +
-        (overdue * w_overdue) +
-        (ripple * w_ripple)
-    ) / normalize_factor
-
-    final_scores = final_scores.sort_values(ascending=False)
-
-    return final_scores, gaps
+    return scores.sort_values(ascending=False)
 
 # ==========================================
-# MAIN INTERFACE
+# SELF-LEARNING OPTIMIZER
+# ==========================================
+def optimize_weights(history_df, backtest_window=50):
+
+    history_df = history_df.head(backtest_window)
+
+    best_score = -1
+    best_weights = None
+
+    weight_options = [
+        (0.4,0.2,0.3,0.1),
+        (0.3,0.2,0.3,0.2),
+        (0.35,0.2,0.35,0.1),
+        (0.25,0.25,0.35,0.15),
+        (0.3,0.25,0.25,0.2)
+    ]
+
+    for weights in weight_options:
+
+        hits = 0
+
+        for i in range(len(history_df) - 1):
+            trigger = parse_numbers(history_df.iloc[i]['numbers'])
+            actual_bonus = int(history_df.iloc[i]['bonus'])
+
+            past_data = history_df.iloc[i+1:]
+            if len(trigger) < 3:
+                continue
+
+            ranked = generate_scores(past_data, trigger, weights)
+            top5 = ranked.head(5).index.tolist()
+
+            if actual_bonus in top5:
+                hits += 1
+
+        if hits > best_score:
+            best_score = hits
+            best_weights = weights
+
+    return best_weights, best_score
+
+# ==========================================
+# MAIN
 # ==========================================
 history = get_history()
 
 if history.empty:
-    st.info("Upload history data in sidebar to begin.")
+    st.info("Upload draw history to begin.")
 else:
-    st.subheader("🔮 Input Trigger Draw")
-    user_input = st.text_input("Enter 6 Main Numbers (spaces only):")
 
-    if user_input:
-        results = calculate_v3(history, user_input)
+    st.sidebar.header("🧠 Self-Learning Mode")
+    backtest_window = st.sidebar.slider("Backtest Window", 30, 200, 80)
 
-        if results:
-            final_scores, gaps = results
+    if st.sidebar.button("Run Weight Optimization"):
+        with st.spinner("Training V4 Engine..."):
+            best_weights, score = optimize_weights(history, backtest_window)
+            st.session_state["best_weights"] = best_weights
+            st.session_state["best_score"] = score
 
-            st.divider()
-            st.header("🏆 Adaptive Confluence Ranking")
+    if "best_weights" in st.session_state:
+        st.sidebar.success(f"Optimized Weights: {st.session_state['best_weights']}")
+        st.sidebar.info(f"Backtest Hits: {st.session_state['best_score']}")
 
-            top7 = final_scores.head(7)
+    st.subheader("🔮 Enter Trigger Draw")
+    user_input = st.text_input("Enter 6 Main Numbers (space separated)")
 
-            for n, score in top7.items():
-                strength = round(score, 3)
-                if score > 0.65:
-                    st.success(f"#{n} | Strength: {strength}")
-                elif score > 0.45:
-                    st.warning(f"#{n} | Strength: {strength}")
-                else:
-                    st.info(f"#{n} | Strength: {strength}")
+    if user_input and "best_weights" in st.session_state:
 
-            # ------------------------------------------
-            # 📊 Pressure Visualization
-            # ------------------------------------------
-            st.divider()
-            st.subheader("📊 Pressure Index (Overdue Decay)")
-            fig = px.bar(
-                x=gaps.index,
-                y=gaps.values,
-                labels={'x': 'Ball', 'y': 'Draws Since Seen'}
-            )
-            st.plotly_chart(fig, use_container_width=True)
+        trigger = [int(x) for x in user_input.split() if x.isdigit()]
 
-            # ------------------------------------------
-            # 📜 Archive
-            # ------------------------------------------
-            with st.expander("View Recent Draws"):
-                st.dataframe(history.head(20), use_container_width=True)
+        final_scores = generate_scores(history, trigger, st.session_state["best_weights"])
+
+        st.divider()
+        st.header("🏆 V4 Self-Learning Ranking")
+
+        for n, score in final_scores.head(7).items():
+            strength = round(score,3)
+            if strength > 0.6:
+                st.success(f"#{n} | Strength: {strength}")
+            elif strength > 0.4:
+                st.warning(f"#{n} | Strength: {strength}")
+            else:
+                st.info(f"#{n} | Strength: {strength}")
+
+        with st.expander("View Recent Draws"):
+            st.dataframe(history.head(20), use_container_width=True)
