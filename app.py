@@ -1,79 +1,104 @@
 import streamlit as st
-import random
+import pandas as pd
 import numpy as np
+import itertools
 
-MAX_NUMBER = 49
+st.set_page_config(page_title="2–3 Hunter Engine", layout="wide")
 
-# ==========================================
-# STRUCTURE HELPERS
-# ==========================================
+st.title("🎯 2–3 Hunter Engine")
+st.caption("Prioritized 3-number selection from last 3 draws (AI weighted)")
 
-def generate_balanced_set():
-    lows = random.sample(range(1,25), 3)
-    highs = random.sample(range(25,50), 3)
-    return sorted(lows + highs)
+# ==========================
+# FILE UPLOAD (EXCEL)
+# ==========================
+uploaded_file = st.file_uploader("Upload Lotto History (.xlsx)", type=["xlsx"])
 
-def generate_low_heavy_set():
-    lows = random.sample(range(1,25), 4)
-    highs = random.sample(range(25,50), 2)
-    return sorted(lows + highs)
+if uploaded_file:
 
-def generate_high_heavy_set():
-    lows = random.sample(range(1,25), 2)
-    highs = random.sample(range(25,50), 4)
-    return sorted(lows + highs)
+    # Read Excel safely
+    df = pd.read_excel(uploaded_file)
 
-def generate_even_heavy_set():
-    evens = random.sample([x for x in range(1,50) if x%2==0], 4)
-    odds = random.sample([x for x in range(1,50) if x%2!=0], 2)
-    return sorted(evens + odds)
+    st.success("Excel file loaded successfully.")
 
-def generate_wide_spread_set():
-    return sorted(random.sample(range(1,50), 6))
+    # --------------------------
+    # Basic Cleaning
+    # --------------------------
+    df = df.dropna(how="all")
+    df = df.reset_index(drop=True)
 
-# ==========================================
-# OVERLAP CONTROL
-# ==========================================
+    # Assuming:
+    # Column 0 = Date
+    # Columns 1–6 = Main numbers
+    # Column 7 = Bonus (optional)
 
-def limit_overlap(portfolio, new_set, max_overlap=2):
-    for existing in portfolio:
-        if len(set(existing) & set(new_set)) > max_overlap:
-            return False
-    return True
+    if df.shape[1] < 7:
+        st.error("File format incorrect. Expecting at least 7 columns.")
+        st.stop()
 
-def build_portfolio(size):
-    portfolio = []
-    generators = [
-        generate_balanced_set,
-        generate_low_heavy_set,
-        generate_high_heavy_set,
-        generate_even_heavy_set,
-        generate_wide_spread_set
-    ]
+    number_columns = df.columns[1:8]  # 6 mains + bonus
+    df = df.sort_values(by=df.columns[0])
 
-    while len(portfolio) < size:
-        gen = random.choice(generators)
-        candidate = gen()
-        if limit_overlap(portfolio, candidate):
-            portfolio.append(candidate)
+    # ==========================
+    # EXTRACT LAST 3 DRAWS
+    # ==========================
+    last3 = df.tail(3)
 
-    return portfolio
+    pool = []
+    for col in number_columns:
+        pool.extend(last3[col].values)
 
-# ==========================================
-# APP UI
-# ==========================================
+    pool = [int(x) for x in pool if pd.notnull(x)]
 
-st.title("🔥 V7 – Structured Portfolio Engine")
+    st.subheader("📊 Last 3 Draws Pool (21 Numbers)")
+    st.write(pool)
 
-st.write("""
-This engine does NOT predict.
-It builds disciplined, structured portfolios under randomness.
-""")
+    # ==========================
+    # AI WEIGHTED SCORING
+    # ==========================
+    scores = {}
 
-portfolio_size = st.slider("Number of Sets", 1, 10, 5)
+    for number in set(pool):
+        scores[number] = 0
 
-if st.button("Generate Structured Portfolio"):
-    sets = build_portfolio(portfolio_size)
+    # Frequency weighting
+    for number in pool:
+        scores[number] += pool.count(number) * 3
 
-    for i, s in enumerate(sets, 1):
-        st.write(f"Set {i}: {s}")
+    # Recency bonus (latest draw)
+    latest_draw = last3.iloc[-1][number_columns].values
+    for number in latest_draw:
+        scores[number] += 2
+
+    # Overheat penalty (appears in all 3 draws)
+    for number in set(pool):
+        if pool.count(number) >= 3:
+            scores[number] -= 2
+
+    # Sort ranked numbers
+    ranked_numbers = sorted(scores.items(), key=lambda x: x[1], reverse=True)
+
+    st.subheader("🧠 Ranked Numbers (AI Weighted)")
+    st.write(ranked_numbers)
+
+    # ==========================
+    # BUILD 3-NUMBER HUNTER SETS
+    # ==========================
+    top_numbers = [num for num, score in ranked_numbers[:7]]
+
+    combos = list(itertools.combinations(top_numbers, 3))
+
+    combo_scores = []
+
+    for combo in combos:
+        combo_score = sum(scores[n] for n in combo)
+        combo_scores.append((combo, combo_score))
+
+    combo_scores = sorted(combo_scores, key=lambda x: x[1], reverse=True)
+
+    st.subheader("🔥 Top Prioritized 3-Number Hunter Sets")
+
+    for combo, score in combo_scores[:5]:
+        st.write(f"{combo}  | Score: {score}")
+
+else:
+    st.info("Upload your Excel file (.xlsx) to begin.")
