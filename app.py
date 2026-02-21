@@ -4,18 +4,14 @@ import numpy as np
 import sqlite3
 import os
 import re
-from xgboost import XGBClassifier
-from sklearn.preprocessing import MultiLabelBinarizer
-
-DB_PATH = "v6_draws.db"
-MAX_NUMBER = 49
 
 # ==========================================
 # DATABASE SETUP
 # ==========================================
+DB_PATH = os.path.join(os.getcwd(), "database", "v6_draws.db")
+os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+
 def init_db():
-    if not os.path.exists("database"):
-        os.makedirs("database")
     conn = sqlite3.connect(DB_PATH)
     conn.execute("""
         CREATE TABLE IF NOT EXISTS draws (
@@ -29,9 +25,17 @@ def init_db():
 init_db()
 
 def get_history():
+    if not os.path.exists(DB_PATH):
+        st.warning("Database not found. Upload a sheet first.")
+        return pd.DataFrame(columns=["id","numbers","bonus"])
     conn = sqlite3.connect(DB_PATH)
-    df = pd.read_sql("SELECT * FROM draws ORDER BY id ASC", conn)
-    conn.close()
+    try:
+        df = pd.read_sql("SELECT * FROM draws ORDER BY id ASC", conn)
+    except Exception as e:
+        st.error(f"Failed reading database: {e}")
+        df = pd.DataFrame(columns=["id","numbers","bonus"])
+    finally:
+        conn.close()
     return df
 
 # ==========================================
@@ -52,8 +56,40 @@ def parse_numbers_str(s):
     return [safe_int(x) for x in str(s).split(",") if safe_int(x) is not None]
 
 # ==========================================
-# DATA UPLOAD
+# MOBILE-SAFE WEIGHTED ENGINE
 # ==========================================
+MAX_NUMBER = 49
+
+def train_weighted_model(history):
+    counts_main = np.zeros(MAX_NUMBER)
+    counts_bonus = np.zeros(MAX_NUMBER)
+
+    for _, row in history.iterrows():
+        nums = parse_numbers_str(row["numbers"])
+        for n in nums:
+            if n and 1 <= n <= MAX_NUMBER:
+                counts_main[n-1] += 1
+        b = safe_int(row["bonus"])
+        if b and 1 <= b <= MAX_NUMBER:
+            counts_bonus[b-1] += 1
+
+    # Weighted probabilities (recent numbers slightly more weight)
+    weights_main = counts_main + 0.5 * np.roll(counts_main, 1)  # recent influence
+    weights_bonus = counts_bonus + 0.5 * np.roll(counts_bonus, 1)
+
+    return weights_main, weights_bonus
+
+def predict_next_draw(weights_main, weights_bonus):
+    top6_idx = weights_main.argsort()[-6:][::-1] + 1
+    bonus_pred = int(weights_bonus.argmax()) + 1
+    return list(top6_idx), bonus_pred
+
+# ==========================================
+# APP UI
+# ==========================================
+st.title("🔥 SIDIAN DELTA V6 – Mobile-Safe AI Engine")
+
+# --- SIDEBAR UPLOAD ---
 with st.sidebar:
     st.header("📂 Upload Draw History")
     file = st.file_uploader("CSV or XLSX", type=["csv", "xlsx"])
@@ -76,119 +112,34 @@ with st.sidebar:
             st.success(f"{len(cleaned)} rows committed successfully!")
             st.rerun()
 
-# ==========================================
-# FEATURE ENGINEERING FOR AI
-# ==========================================
-def create_features(df):
-    X = []
-    y = []
-    for i in range(len(df)-1):
-        curr = parse_numbers_str(df.iloc[i]["numbers"])
-        next_draw = parse_numbers_str(df.iloc[i+1]["numbers"])
-        bonus_next = safe_int(df.iloc[i+1]["bonus"])
-
-        # Feature vector: one-hot for numbers 1-49
-        vec = np.zeros(MAX_NUMBER)
-        for n in curr:
-            vec[n-1] = 1
-
-        # Additional features: sum, mean, odd/even ratio
-        vec = np.append(vec, [sum(curr), np.mean(curr), sum(1 for x in curr if x%2==0)/6])
-        X.append(vec)
-        y.append(next_draw + [bonus_next])
-    return np.array(X), y
-
-# ==========================================
-# TRAIN XGBOOST MULTI-TARGET MODEL
-# ==========================================
-def train_ai_model(df):
-    X, y = create_features(df)
-    mlb = MultiLabelBinarizer(classes=list(range(1, MAX_NUMBER+1)))
-    Y_main = mlb.fit_transform([row[:6] for row in y])
-    Y_bonus = np.array([row[6] for row in y])
-
-    model_main = XGBClassifier(use_label_encoder=False, eval_metric='logloss')
-    model_bonus = XGBClassifier(use_label_encoder=False, eval_metric='logloss')
-
-    model_main.fit(X, Y_main)
-    model_bonus.fit(X, Y_bonus)
-
-    return model_main, model_bonus, mlb
-
-# ==========================================
-# PREDICTION
-# ==========================================
-def predict_next(model_main, model_bonus, mlb, trigger_nums):
-    vec = np.zeros(MAX_NUMBER)
-    for n in trigger_nums:
-        if 1 <= n <= MAX_NUMBER:
-            vec[n-1] = 1
-    vec = np.append(vec, [sum(trigger_nums), np.mean(trigger_nums), sum(1 for x in trigger_nums if x%2==0)/6])
-    vec = vec.reshape(1, -1)
-
-    # Predict probability for main numbers
-    probs_main = model_main.predict_proba(vec)
-    prob_sums = np.sum(np.array([p[:,1] for p in probs_main]), axis=0)
-    top6_idx = prob_sums.argsort()[-6:][::-1] + 1
-
-    # Predict bonus
-    bonus_pred = int(model_bonus.predict(vec)[0])
-
-    return list(top6_idx), bonus_pred
-
-# ==========================================
-# MAIN PANEL
-# ==========================================
-st.title("🔥 SIDIAN DELTA V6 – Adaptive AI Engine")
+# --- MAIN PANEL ---
 history = get_history()
 st.subheader("📊 Database Status")
 st.write(f"Stored Draws: {len(history)}")
 
-if len(history) < 20:
-    st.info("Upload at least 20 draws for AI training.")
+if len(history) < 10:
+    st.info("Upload at least 10 draws for reliable weighted AI predictions.")
 else:
-    if st.button("Train AI Engine"):
-        with st.spinner("Training AI..."):
-            model_main, model_bonus, mlb = train_ai_model(history)
-            st.session_state["model_main"] = model_main
-            st.session_state["model_bonus"] = model_bonus
-            st.session_state["mlb"] = mlb
-            st.success("AI Engine trained successfully!")
-
-    st.subheader("🔮 Enter Trigger Draw")
-    user_input = st.text_input("Enter 6 numbers (space or comma separated)", placeholder="e.g. 5 12 19 27 33 41")
-    if user_input and "model_main" in st.session_state:
-        trigger_nums = parse_manual_input(user_input)
-        if len(trigger_nums) != 6:
-            st.warning("Enter exactly 6 main numbers")
-        else:
-            pred_main, pred_bonus = predict_next(
-                st.session_state["model_main"],
-                st.session_state["model_bonus"],
-                st.session_state["mlb"],
-                trigger_nums
-            )
-            st.success(f"Predicted Next Main Numbers: {pred_main}")
-            st.success(f"Predicted Next Bonus: {pred_bonus}")
+    st.subheader("🔮 Generate Next Prediction")
+    weights_main, weights_bonus = train_weighted_model(history)
+    if st.button("Run Weighted AI Engine"):
+        pred_nums, pred_bonus = predict_next_draw(weights_main, weights_bonus)
+        st.success(f"Predicted Main Numbers: {pred_nums}")
+        st.success(f"Predicted Bonus: {pred_bonus}")
 
     st.subheader("🧪 Manual Basket Backtest")
     manual_input = st.text_input(
         "Enter past draw to test (6 numbers + bonus, spaces/commas OK)",
         placeholder="5 12 19 27 33 41 9"
     )
-    if manual_input and "model_main" in st.session_state:
+    if manual_input:
         parsed = parse_manual_input(manual_input)
         if len(parsed) < 7:
             st.warning("Enter 6 main numbers + 1 bonus")
         else:
             test_nums = parsed[:6]
             test_bonus = parsed[6]
-            pred_main, pred_bonus = predict_next(
-                st.session_state["model_main"],
-                st.session_state["model_bonus"],
-                st.session_state["mlb"],
-                test_nums
-            )
+            pred_main, pred_bonus = predict_next_draw(weights_main, weights_bonus)
             match_count = len(set(test_nums) & set(pred_main))
             bonus_match = (test_bonus == pred_bonus)
             st.write(f"Main Matches: {match_count}/6")
