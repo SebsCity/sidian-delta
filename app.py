@@ -1,136 +1,97 @@
 import streamlit as st
 import pandas as pd
-import numpy as np
-import itertools
+from collections import Counter
 
-# ==========================================
-# CONFIG
-# ==========================================
-st.set_page_config(page_title="Sidian 2–3 Hunter", layout="wide", page_icon="🎯")
-MAX_NUMBER = 49
-ANALYSIS_WINDOW = 250  # Cloud-safe limit
+# Set page to mobile-friendly wide mode
+st.set_page_config(page_title="Sidian Bonus Lab", layout="centered")
 
-st.title("🎯 Sidian 2–3 Hunter Engine")
-st.caption("Cloud Optimized | Android Stable | Short-Term Structural Bias")
+st.title("🎰 Sidian Synthesis Engine")
+st.markdown("### Predictive Analytics via Historical Data")
 
-# ==========================================
-# DATA LOAD (CACHED)
-# ==========================================
-@st.cache_data
-def load_file(uploaded):
-    if uploaded.name.endswith(".xlsx"):
-        df = pd.read_excel(uploaded)
-    else:
-        df = pd.read_csv(uploaded)
+# --- SECTION 1: DATA UPLOAD ---
+st.sidebar.header("Data Management")
+uploaded_file = st.sidebar.file_uploader("Upload 'Full A Lister 1.0' Excel", type=["xlsx", "xls"])
 
-    df = df.dropna(how="all").reset_index(drop=True)
+def process_data(file):
+    try:
+        # Read the Excel file
+        df = pd.read_excel(file)
+        # Clean data: Ensure only numeric values are processed
+        numeric_data = df.select_dtypes(include=['number']).values.flatten()
+        return Counter(numeric_data), df
+    except Exception as e:
+        st.error(f"Error reading file: {e}")
+        return None, None
 
-    # Auto-detect numeric columns
-    numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
-
-    if len(numeric_cols) < 6:
-        st.error("File must contain at least 6 numeric columns.")
-        st.stop()
-
-    return df, numeric_cols
-
-# ==========================================
-# ANALYTICS ENGINE (LIGHTWEIGHT)
-# ==========================================
-@st.cache_data
-def analyze(df, numeric_cols):
-
-    df = df.tail(ANALYSIS_WINDOW).iloc[::-1]  # Newest first
-
-    main_cols = numeric_cols[:6]
-    bonus_col = numeric_cols[6] if len(numeric_cols) > 6 else None
-
-    # --- Last 3 Draws → 21 Pool ---
-    last3 = df.head(3)
-
-    pool = []
-    for _, row in last3.iterrows():
-        mains = [int(row[c]) for c in main_cols]
-        pool.extend(mains)
-        if bonus_col:
-            pool.append(int(row[bonus_col]))
-
-    unique_21 = sorted(list(set(pool)))
-
-    # --- Stickiness ---
-    sticky_scores = {n: 0 for n in unique_21}
-
-    for i in range(len(df)-1):
-        curr = set(df.iloc[i][main_cols].astype(int))
-        prev = set(df.iloc[i+1][main_cols].astype(int))
-        repeats = curr.intersection(prev)
-
-        for n in repeats:
-            if n in sticky_scores:
-                sticky_scores[n] += 1
-
-    top_sticky = pd.Series(sticky_scores).nlargest(5)
-
-    # --- AI Weighted Scoring ---
-    scores = {}
-
-    for n in unique_21:
-        freq = pool.count(n)
-        scores[n] = freq * 3
-
-        # recency bonus
-        if n in last3.iloc[0][main_cols].values:
-            scores[n] += 2
-
-        # mild cooling penalty
-        if freq >= 3:
-            scores[n] -= 1
-
-    ranked = sorted(scores.items(), key=lambda x: x[1], reverse=True)
-
-    # --- Build 3-number Hunter Sets ---
-    top7 = [n for n, s in ranked[:7]]
-    combos = list(itertools.combinations(top7, 3))
-
-    combo_scores = []
-    for c in combos:
-        combo_scores.append((c, sum(scores[n] for n in c)))
-
-    combo_scores = sorted(combo_scores, key=lambda x: x[1], reverse=True)
-
-    return unique_21, top_sticky, ranked, combo_scores[:5]
-
-# ==========================================
-# UI
-# ==========================================
-uploaded = st.file_uploader("Upload Excel or CSV", type=["xlsx", "csv"])
-
-if uploaded:
-
-    df, numeric_cols = load_file(uploaded)
-    u21, sticky, ranked, top_combos = analyze(df, numeric_cols)
-
-    st.subheader("📍 The 21 Exclusion Pool")
-    st.write(u21)
-
-    col1, col2 = st.columns(2)
-
-    with col1:
-        st.subheader("🔄 Sticky Leaders")
-        for num, score in sticky.items():
-            st.write(f"#{num} — Repeat Score: {score}")
-
-    with col2:
-        st.subheader("🧠 AI Ranked Core")
-        for num, score in ranked[:7]:
-            st.write(f"#{num} — AI Score: {score}")
-
-    st.divider()
-
-    st.subheader("🔥 Top 3-Number Hunter Sets")
-
-    for combo, score in top_combos:
-        st.write(f"{combo} — Priority Score: {score}")
-
+freq_map, raw_df = None, None
+if uploaded_file:
+    freq_map, raw_df = process_data(uploaded_file)
+    st.sidebar.success("Datasheet Loaded Successfully!")
 else:
-    st.info("Upload your historical sheet to begin.")
+    st.info("Please upload your historical Excel file in the sidebar to begin.")
+
+# --- SECTION 2: INPUT DRAWS ---
+st.divider()
+st.subheader("Input 3 Previous Draws")
+st.caption("Enter 6 main numbers + 1 bonus for each (21 total numbers)")
+
+def get_draw_input(label, key_suffix):
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        nums = st.text_input(f"{label} (6 Main):", placeholder="e.g. 2, 14, 25, 30, 31, 44", key=f"n_{key_suffix}")
+    with col2:
+        bonus = st.text_input(f"Bonus:", placeholder="7", key=f"b_{key_suffix}")
+    
+    if nums and bonus:
+        try:
+            combined = [int(n.strip()) for n in nums.split(',')]
+            combined.append(int(bonus.strip()))
+            if len(combined) == 7:
+                return combined
+            else:
+                st.warning(f"{label} must have exactly 7 numbers total.")
+        except ValueError:
+            st.error(f"Use numbers and commas only in {label}")
+    return []
+
+d1 = get_draw_input("Draw 1 (Latest)", "one")
+d2 = get_draw_input("Draw 2", "two")
+d3 = get_draw_input("Draw 3", "three")
+
+# --- SECTION 3: PREDICTION LOGIC ---
+if st.button("Determine Likely 4 Numbers", type="primary"):
+    all_recent = d1 + d2 + d3
+    
+    if len(all_recent) < 21:
+        st.warning("Please fill in all 3 draws (21 numbers total) before predicting.")
+    elif freq_map is None:
+        st.error("Historical datasheet missing. Please upload your Excel file.")
+    else:
+        # ANALYSIS: 
+        # We look for 'Hot Numbers' (High Frequency) 
+        # that have NOT appeared in the last 3 draws (Expected to return)
+        recent_set = set(all_recent)
+        
+        # Sort history by most frequent
+        sorted_freq = sorted(freq_map.items(), key=lambda x: x[1], reverse=True)
+        
+        predictions = []
+        for num, count in sorted_freq:
+            if num not in recent_set:
+                predictions.append(int(num))
+            if len(predictions) == 4:
+                break
+        
+        # Display Results
+        st.divider()
+        st.balloons()
+        st.write("### 🔮 Predicted Numbers:")
+        cols = st.columns(4)
+        for i, p_num in enumerate(predictions):
+            cols[i].metric(label=f"Number {i+1}", value=p_num)
+        
+        st.caption("Logic: High-frequency historical numbers excluded from the last 21 draws.")
+
+# --- FOOTER ---
+st.sidebar.divider()
+st.sidebar.write("Developed for **Sidian Brand**")
