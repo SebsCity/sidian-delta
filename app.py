@@ -2,96 +2,74 @@ import streamlit as st
 import pandas as pd
 from collections import Counter
 
-# Set page to mobile-friendly wide mode
+# Optimized for mobile viewing
 st.set_page_config(page_title="Sidian Bonus Lab", layout="centered")
 
 st.title("🎰 Sidian Synthesis Engine")
-st.markdown("### Predictive Analytics via Historical Data")
+st.caption("Version 1.0 - Predictive Analysis")
 
-# --- SECTION 1: DATA UPLOAD ---
-st.sidebar.header("Data Management")
-uploaded_file = st.sidebar.file_uploader("Upload 'Full A Lister 1.0' Excel", type=["xlsx", "xls"])
+# --- DATA CACHING (Stops the slowness) ---
+@st.cache_data
+def load_and_process(file):
+    # Reads Excel and prepares frequency map once per upload
+    df = pd.read_excel(file)
+    # Extract all numbers from all columns
+    all_vals = df.select_dtypes(include=['number']).values.flatten()
+    clean_vals = [int(n) for n in all_vals if pd.notnull(n)]
+    return Counter(clean_vals)
 
-def process_data(file):
-    try:
-        # Read the Excel file
-        df = pd.read_excel(file)
-        # Clean data: Ensure only numeric values are processed
-        numeric_data = df.select_dtypes(include=['number']).values.flatten()
-        return Counter(numeric_data), df
-    except Exception as e:
-        st.error(f"Error reading file: {e}")
-        return None, None
+# --- SIDEBAR UPLOAD ---
+st.sidebar.header("Data Source")
+uploaded_file = st.sidebar.file_uploader("Upload 'Full A Lister 1.0'", type=["xlsx", "xls"])
 
-freq_map, raw_df = None, None
 if uploaded_file:
-    freq_map, raw_df = process_data(uploaded_file)
-    st.sidebar.success("Datasheet Loaded Successfully!")
-else:
-    st.info("Please upload your historical Excel file in the sidebar to begin.")
+    with st.spinner("Analyzing 2,278 draws..."):
+        freq_map = load_and_process(uploaded_file)
+    st.sidebar.success("Analysis Complete!")
 
-# --- SECTION 2: INPUT DRAWS ---
-st.divider()
-st.subheader("Input 3 Previous Draws")
-st.caption("Enter 6 main numbers + 1 bonus for each (21 total numbers)")
+    # --- INPUT FORM (Stops lag while typing) ---
+    with st.form("main_logic_form"):
+        st.subheader("Input Previous 3 Draws")
+        st.info("Enter 6 numbers + bonus, separated by commas")
+        
+        row1 = st.text_input("Latest Draw (Draw 1)", placeholder="e.g. 1, 15, 22, 30, 41, 49, 8")
+        row2 = st.text_input("Draw 2", placeholder="e.g. 4, 10, 19, 25, 33, 40, 2")
+        row3 = st.text_input("Draw 3", placeholder="e.g. 7, 12, 18, 28, 35, 42, 11")
+        
+        submit = st.form_submit_button("GENERATE PREDICTION")
 
-def get_draw_input(label, key_suffix):
-    col1, col2 = st.columns([3, 1])
-    with col1:
-        nums = st.text_input(f"{label} (6 Main):", placeholder="e.g. 2, 14, 25, 30, 31, 44", key=f"n_{key_suffix}")
-    with col2:
-        bonus = st.text_input(f"Bonus:", placeholder="7", key=f"b_{key_suffix}")
-    
-    if nums and bonus:
+    if submit:
         try:
-            combined = [int(n.strip()) for n in nums.split(',')]
-            combined.append(int(bonus.strip()))
-            if len(combined) == 7:
-                return combined
-            else:
-                st.warning(f"{label} must have exactly 7 numbers total.")
-        except ValueError:
-            st.error(f"Use numbers and commas only in {label}")
-    return []
+            # Parse all 21 numbers
+            all_inputs = []
+            for r in [row1, row2, row3]:
+                nums = [int(n.strip()) for n in r.split(',')]
+                if len(nums) != 7:
+                    st.error(f"Row error: Expected 7 numbers, found {len(nums)}")
+                    st.stop()
+                all_inputs.extend(nums)
 
-d1 = get_draw_input("Draw 1 (Latest)", "one")
-d2 = get_draw_input("Draw 2", "two")
-d3 = get_draw_input("Draw 3", "three")
+            # Sidian Prediction Logic:
+            # Find the most frequent numbers in history that are NOT in the last 21 numbers.
+            recent_set = set(all_inputs)
+            sorted_history = sorted(freq_map.items(), key=lambda x: x[1], reverse=True)
+            
+            final_4 = []
+            for num, count in sorted_history:
+                if num not in recent_set:
+                    final_4.append(num)
+                if len(final_4) == 4:
+                    break
+            
+            # Result Display
+            st.divider()
+            st.success("### 🔮 Predicted Next 4 Numbers")
+            res_cols = st.columns(4)
+            for i, val in enumerate(final_4):
+                res_cols[i].metric(label=f"Rank {i+1}", value=val)
+                
+        except Exception as e:
+            st.error("Format Error: Ensure you use commas between numbers.")
 
-# --- SECTION 3: PREDICTION LOGIC ---
-if st.button("Determine Likely 4 Numbers", type="primary"):
-    all_recent = d1 + d2 + d3
-    
-    if len(all_recent) < 21:
-        st.warning("Please fill in all 3 draws (21 numbers total) before predicting.")
-    elif freq_map is None:
-        st.error("Historical datasheet missing. Please upload your Excel file.")
-    else:
-        # ANALYSIS: 
-        # We look for 'Hot Numbers' (High Frequency) 
-        # that have NOT appeared in the last 3 draws (Expected to return)
-        recent_set = set(all_recent)
-        
-        # Sort history by most frequent
-        sorted_freq = sorted(freq_map.items(), key=lambda x: x[1], reverse=True)
-        
-        predictions = []
-        for num, count in sorted_freq:
-            if num not in recent_set:
-                predictions.append(int(num))
-            if len(predictions) == 4:
-                break
-        
-        # Display Results
-        st.divider()
-        st.balloons()
-        st.write("### 🔮 Predicted Numbers:")
-        cols = st.columns(4)
-        for i, p_num in enumerate(predictions):
-            cols[i].metric(label=f"Number {i+1}", value=p_num)
-        
-        st.caption("Logic: High-frequency historical numbers excluded from the last 21 draws.")
-
-# --- FOOTER ---
-st.sidebar.divider()
-st.sidebar.write("Developed for **Sidian Brand**")
+else:
+    st.warning("Please upload your Excel file in the sidebar to start the engine.")
