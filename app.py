@@ -15,7 +15,6 @@ def init_db():
     conn = sqlite3.connect(DB_PATH)
     conn.execute("""
         CREATE TABLE IF NOT EXISTS draws (
-            id INTEGER PRIMARY KEY,
             numbers TEXT,
             bonus INTEGER
         )
@@ -30,7 +29,15 @@ def get_history():
         return pd.DataFrame(columns=["id","numbers","bonus"])
     conn = sqlite3.connect(DB_PATH)
     try:
-        df = pd.read_sql("SELECT * FROM draws ORDER BY id ASC", conn)
+        # Check table columns
+        cursor = conn.cursor()
+        cursor.execute("PRAGMA table_info(draws)")
+        cols = [c[1] for c in cursor.fetchall()]
+        if "id" in cols:
+            df = pd.read_sql("SELECT * FROM draws ORDER BY id ASC", conn)
+        else:
+            # Use rowid as id fallback
+            df = pd.read_sql("SELECT rowid AS id, * FROM draws ORDER BY rowid ASC", conn)
     except Exception as e:
         st.error(f"Failed reading database: {e}")
         df = pd.DataFrame(columns=["id","numbers","bonus"])
@@ -56,7 +63,7 @@ def parse_numbers_str(s):
     return [safe_int(x) for x in str(s).split(",") if safe_int(x) is not None]
 
 # ==========================================
-# MOBILE-SAFE WEIGHTED ENGINE
+# WEIGHTED ENGINE
 # ==========================================
 MAX_NUMBER = 49
 
@@ -73,8 +80,8 @@ def train_weighted_model(history):
         if b and 1 <= b <= MAX_NUMBER:
             counts_bonus[b-1] += 1
 
-    # Weighted probabilities (recent numbers slightly more weight)
-    weights_main = counts_main + 0.5 * np.roll(counts_main, 1)  # recent influence
+    # Weighted probabilities (recent draws have extra weight)
+    weights_main = counts_main + 0.5 * np.roll(counts_main, 1)
     weights_bonus = counts_bonus + 0.5 * np.roll(counts_bonus, 1)
 
     return weights_main, weights_bonus
@@ -87,7 +94,7 @@ def predict_next_draw(weights_main, weights_bonus):
 # ==========================================
 # APP UI
 # ==========================================
-st.title("🔥 SIDIAN DELTA V6 – Mobile-Safe AI Engine")
+st.title("🔥 SIDIAN DELTA V6 – Robust Mobile AI Engine")
 
 # --- SIDEBAR UPLOAD ---
 with st.sidebar:
